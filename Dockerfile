@@ -5,16 +5,18 @@
 
 FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat
-ENV PNPM_HOME="/pnpm" \
-    PATH="/pnpm:$PATH"
-RUN corepack enable
+# pnpm is installed directly rather than via corepack. Corepack downloads and
+# signature-verifies the pnpm tarball at first invocation, and the corepack
+# bundled with the Node image is often too old to verify a recent pnpm release
+# -- which surfaces as `pnpm install` failing with exit code 1.
+RUN npm install -g pnpm@11.22.0
 WORKDIR /app
 
 # ---------- deps ----------
 # Manifest + lockfile only, so this layer caches until a dependency changes.
 FROM base AS deps
 COPY package.json pnpm-lock.yaml .npmrc ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm --version && pnpm install --frozen-lockfile
 
 # ---------- build ----------
 FROM deps AS build
