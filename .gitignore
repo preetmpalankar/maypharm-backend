@@ -1,0 +1,19 @@
+# dependencies
+node_modules
+
+# build output
+dist
+coverage
+
+# turbo
+.turbo
+
+# env — never commit; Railway injects these as service variables
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
