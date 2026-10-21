@@ -10,6 +10,7 @@ import { AdminUsersController } from './admin/admin-users.controller';
 import { AppController } from './app.controller';
 import { AuditService } from './audit/audit.service';
 import { AuthService } from './auth/auth.service';
+import { BookmarksController } from './bookmarks.controller';
 import { BrandsController } from './brands.controller';
 import { CategoriesController } from './categories.controller';
 import { AccountThrottlerGuard } from './common/account-throttler.guard';
@@ -29,6 +30,7 @@ import { SupabaseService } from './supabase.service';
     ContentController,
     BrandsController,
     CategoriesController,
+    BookmarksController,
     AdminContentController,
     AdminBrandsController,
     AdminCategoriesController,

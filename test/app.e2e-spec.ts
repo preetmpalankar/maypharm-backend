@@ -66,13 +66,21 @@ describe('MayPharm API (e2e)', () => {
     ['GET', '/admin/users'],
     ['POST', '/admin/uploads'],
     ['POST', '/admin/content'],
+    ['GET', '/bookmarks'],
+    ['GET', '/bookmarks/ids'],
+    ['PUT', '/bookmarks/00000000-0000-4000-8000-000000000000'],
+    ['DELETE', '/bookmarks/00000000-0000-4000-8000-000000000000'],
   ])(
     '%s %s refuses anonymous callers with a JSON 401',
     async (method, path) => {
       const call =
         method === 'GET'
           ? request(server).get(path)
-          : request(server).post(path).send({});
+          : method === 'PUT'
+            ? request(server).put(path)
+            : method === 'DELETE'
+              ? request(server).delete(path)
+              : request(server).post(path).send({});
       const response = await call.expect(401);
       const body = response.body as ErrorBody;
 
