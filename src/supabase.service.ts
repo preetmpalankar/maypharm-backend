@@ -1,72 +1,28 @@
-import {
-  Injectable,
-  InternalServerErrorException,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import { Injectable } from '@nestjs/common';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { loadConfig } from './config';
 
-type AdminProfileAccess = {
-  role: string;
-  status: string;
-};
-
+/** Service-role Supabase client. Only ever used server-side, after auth checks. */
 @Injectable()
 export class SupabaseService {
   readonly admin: SupabaseClient;
+  readonly url: string;
+  readonly bucket: string;
 
   constructor() {
-    const url =
-      process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const config = loadConfig();
 
-    if (!url || !serviceRoleKey) {
-      throw new InternalServerErrorException(
-        'Supabase backend credentials are not configured.',
-      );
-    }
-
-    this.admin = createClient(url, serviceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
+    this.url = config.SUPABASE_URL;
+    this.bucket = config.ASSET_BUCKET;
+    this.admin = createClient(
+      config.SUPABASE_URL,
+      config.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
       },
-    }) as SupabaseClient;
-  }
-
-  async getUserFromBearer(authorization?: string): Promise<User> {
-    const token = authorization?.startsWith('Bearer ')
-      ? authorization.slice('Bearer '.length)
-      : null;
-
-    if (!token) {
-      throw new UnauthorizedException('Bearer token required.');
-    }
-
-    const {
-      data: { user },
-      error,
-    } = await this.admin.auth.getUser(token);
-
-    if (error || !user) {
-      throw new UnauthorizedException('Invalid Supabase session.');
-    }
-
-    return user;
-  }
-
-  async requireAdmin(userId: string) {
-    const { data, error } = await this.admin
-      .from('admin_profiles')
-      .select('role,status')
-      .eq('id', userId)
-      .single<AdminProfileAccess>();
-
-    if (
-      error ||
-      data?.role !== 'admin' ||
-      !['active', 'invited'].includes(data.status)
-    ) {
-      throw new UnauthorizedException('Administrator access required.');
-    }
+    ) as SupabaseClient;
   }
 }

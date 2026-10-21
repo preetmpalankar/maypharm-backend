@@ -5,18 +5,16 @@
 
 FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat
-# pnpm is installed directly rather than via corepack. Corepack downloads and
-# signature-verifies the pnpm tarball at first invocation, and the corepack
-# bundled with the Node image is often too old to verify a recent pnpm release
-# -- which surfaces as `pnpm install` failing with exit code 1.
-RUN npm install -g pnpm@11.22.0
+ENV PNPM_HOME="/pnpm" \
+    PATH="/pnpm:$PATH"
+RUN corepack enable
 WORKDIR /app
 
 # ---------- deps ----------
 # Manifest + lockfile only, so this layer caches until a dependency changes.
 FROM base AS deps
-COPY package.json pnpm-lock.yaml .npmrc ./
-RUN pnpm --version && pnpm install --frozen-lockfile
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+RUN pnpm install --frozen-lockfile
 
 # ---------- build ----------
 FROM deps AS build
@@ -32,9 +30,13 @@ RUN pnpm run build
 # typescript) ship in the final image.
 FROM base AS runner
 ENV NODE_ENV=production
-COPY package.json pnpm-lock.yaml .npmrc ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 RUN pnpm install --frozen-lockfile --prod
 COPY --from=build /app/dist ./dist
+# Run as an unprivileged user; nothing at runtime needs root.
+RUN addgroup -S -g 1001 nodejs && adduser -S -u 1001 -G nodejs maypharm \
+    && chown -R maypharm:nodejs /app
+USER maypharm
 EXPOSE 3000
 # main.ts reads PORT from the environment and binds 0.0.0.0, which Railway's
 # proxy requires.

@@ -25,3 +25,6 @@ coverage
 # Tests and docs — not needed to run the server
 test
 *.md
+
+# Database migrations are applied to Supabase, not shipped in the image
+supabase

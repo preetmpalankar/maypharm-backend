@@ -1,98 +1,115 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# MayPharm API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+NestJS service behind the MayPharm field app and admin portal. It is the only
+component that holds the Supabase service-role key: it authenticates every
+request, enforces roles, validates input, and brokers access to the private
+file bucket.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## How uploads work
 
-## Description
+Files never pass through this API or the web server. That keeps large uploads
+fast, avoids the 1 MB Server Action limit, and keeps memory flat.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ pnpm install
+```
+browser ──1. POST /admin/uploads {name, size}──▶ API   validates type + size, returns a signed URL
+browser ──2. PUT <file bytes> (with progress)──▶ Supabase Storage
+browser ──3. POST /admin/content {…, uploadIntentId}──▶ API
+                                                    reads the stored object's first bytes,
+                                                    checks size and file signature,
+                                                    claims the upload, saves the record
 ```
 
-## Compile and run the project
+- **Verification:** every file is sniffed before a record may reference it (a
+  renamed `.exe` is rejected and deleted). Types are decided by extension, never
+  by the browser's reported MIME.
+- **No orphans:** a failed save deletes the uploaded file; replacing or removing
+  a file deletes the old one; deleting a record deletes its file.
+- **Abandoned uploads** (tab closed after uploading) are swept automatically
+  24 h later. The sweeper runs 1 minute after boot, then every 30 minutes.
+- **Streaming** is piped, never buffered, and forwards `Range` with a true
+  `206`, so video seeking works (Safari/iOS require it).
+
+Accepted types: PDF, PNG, JPG, WEBP, MP4, MOV, WEBM, CSV, XLSX, DOCX, PPTX, up
+to 50 MB (logos: PNG/JPG/WEBP, 2 MB). The limits live in
+`src/storage/file-policy.ts`, mirrored for instant feedback in the web app's
+`src/lib/uploads/rules.ts`.
+
+## Access rules
+
+| Caller | Can |
+| --- | --- |
+| No session / invalid token | nothing (`401`) |
+| Signed in, no MayPharm profile, or profile not `active` | nothing (`403`); public sign-up on Supabase grants no access |
+| Active member | read approved content, brands, categories; stream approved files |
+| Admin (not suspended) | everything under `/admin/*` |
+
+Suspending a user bans their Supabase login and blocks their existing tokens
+immediately. Admins cannot remove their own admin access, and the last active
+admin cannot be demoted.
+
+## Environment
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `SUPABASE_URL` | yes | Project API URL, e.g. `https://<ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Secret. Never expose to a browser. |
+| `CORS_ORIGINS` | yes in prod | Comma-separated web origins, e.g. `https://app.maypharm.com` |
+| `PORT` | no | Railway injects it. Defaults to `3000`. |
+| `HOST` | no | Defaults to `0.0.0.0`. |
+| `ASSET_BUCKET` | no | Defaults to `maypharm-admin-assets`. |
+| `NODE_ENV` | no | `production` in the Docker image. |
+
+Configuration is validated at boot; a missing or malformed variable fails the
+deploy with a message naming it. Outside production a local `.env` is loaded
+automatically (real environment variables always win).
+
+## Local development
 
 ```bash
-# development
-$ pnpm run start
+pnpm install
+cp .env.example .env      # fill in real values
+pnpm start:dev            # http://localhost:3000 (or PORT from .env)
 
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+pnpm test                 # unit tests
+pnpm test:e2e             # HTTP contract tests (no Supabase needed)
+pnpm lint
+pnpm build
 ```
 
-## Run tests
+## Deploying on Railway
+
+1. **Apply database migrations first** (see below).
+2. Create a service from this repo. `railway.json` selects the Dockerfile and
+   the `/health` healthcheck; nothing else needs configuring.
+3. Set the environment variables above.
+4. Deploy. `GET /health` is liveness; `GET /health/ready` also checks that
+   Supabase Auth and Storage are reachable from the instance.
+
+The image is a multi-stage build that installs production dependencies only and
+runs as an unprivileged user.
+
+## Database migrations
+
+SQL migrations live in `supabase/migrations/` and must be applied in order.
+They are idempotent. Apply a new one with the Supabase CLI
+(`supabase db push`), or paste it into the Supabase SQL editor, or:
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/migrations/<file>.sql
 ```
 
-## Deployment
+`202610210006_production_hardening.sql` is required by the upload flow
+(`upload_intents` table, file metadata columns, expanded bucket types).
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Operations
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- **Logs:** one line per request with method, path, status, duration and a
+  request id (`x-request-id`, also returned in every error body). 5xx errors log
+  a stack trace; the client only ever sees a generic message plus the id.
+- **Rate limits:** per signed-in account (not per IP: all browser traffic
+  arrives via the web server). 1200 req/min default, 60/min for upload slots,
+  30/min for account creation.
+- **Deleting users:** use suspension. Audit events reference the acting user,
+  so Supabase refuses to delete an account that has any history.
+- **Security headers** via Helmet; request bodies are capped at 256 KB (files
+  never pass through here).

@@ -6,18 +6,20 @@ import {
   Param,
   Query,
   Res,
-  StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
+import { AuthService } from './auth/auth.service';
 import { brandLibraries, brandLibraryKeys } from './brand-libraries';
+import { escapeFilter } from './common/validation';
 import { getMeta, getRange, paginationSchema } from './pagination';
+import { AssetStorageService } from './storage/asset-storage.service';
 import { SupabaseService } from './supabase.service';
 
 const brandColumns =
   'id,name,slug,category,description,logo_bucket,logo_path,sort_order,updated_at';
 const contentColumns =
-  'id,title,content_type,category,product_name,description,status,storage_bucket,storage_path,metadata,updated_at';
+  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at';
 
 const slugSchema = z
   .string()
@@ -59,14 +61,13 @@ type CountRow = {
 
 const emptyCounts = { product: 0, clinical: 0, media: 0, total: 0 };
 
-// PostgREST treats %, _ and , as operators inside ilike/or filters.
-function escapeFilter(value: string) {
-  return value.replace(/[%_,()]/g, '');
-}
-
 @Controller('brands')
 export class BrandsController {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly supabase: SupabaseService,
+    private readonly storage: AssetStorageService,
+  ) {}
 
   private async getCountsByBrand(brandIds: string[]) {
     const counts = new Map<string, typeof emptyCounts>();
@@ -121,7 +122,7 @@ export class BrandsController {
     @Headers('authorization') authorization: string | undefined,
     @Query() query: Record<string, string>,
   ) {
-    await this.supabase.getUserFromBearer(authorization);
+    await this.auth.requireMember(authorization);
 
     const params = brandListQuerySchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
@@ -134,15 +135,18 @@ export class BrandsController {
       .order('name', { ascending: true })
       .range(from, to);
 
-    if (params.q) {
-      const safeQuery = escapeFilter(params.q);
+    const brandTerm = params.q ? escapeFilter(params.q) : '';
+
+    if (brandTerm) {
       request = request.or(
-        `name.ilike.%${safeQuery}%,category.ilike.%${safeQuery}%`,
+        `name.ilike.%${brandTerm}%,category.ilike.%${brandTerm}%`,
       );
     }
 
-    if (params.category) {
-      request = request.ilike('category', escapeFilter(params.category));
+    const categoryTerm = params.category ? escapeFilter(params.category) : '';
+
+    if (categoryTerm) {
+      request = request.ilike('category', categoryTerm);
     }
 
     const { data, error, count } = await request;
@@ -167,7 +171,7 @@ export class BrandsController {
   async listCategories(
     @Headers('authorization') authorization: string | undefined,
   ) {
-    await this.supabase.getUserFromBearer(authorization);
+    await this.auth.requireMember(authorization);
 
     const { data, error } = await this.supabase.admin
       .from('brands')
@@ -197,7 +201,7 @@ export class BrandsController {
     @Headers('authorization') authorization: string | undefined,
     @Param('slug') slug: string,
   ) {
-    await this.supabase.getUserFromBearer(authorization);
+    await this.auth.requireMember(authorization);
 
     const brand = await this.getBrandBySlug(slug);
     const counts = await this.getCountsByBrand([brand.id]);
@@ -217,7 +221,7 @@ export class BrandsController {
     @Param('library') library: string,
     @Query() query: Record<string, string>,
   ) {
-    await this.supabase.getUserFromBearer(authorization);
+    await this.auth.requireMember(authorization);
 
     const libraryKey = librarySchema.parse(library);
     const brand = await this.getBrandBySlug(slug);
@@ -234,10 +238,11 @@ export class BrandsController {
       .order('id', { ascending: false })
       .range(from, to);
 
-    if (params.q) {
-      const safeQuery = escapeFilter(params.q);
+    const libraryTerm = params.q ? escapeFilter(params.q) : '';
+
+    if (libraryTerm) {
       request = request.or(
-        `title.ilike.%${safeQuery}%,description.ilike.%${safeQuery}%,category.ilike.%${safeQuery}%`,
+        `title.ilike.%${libraryTerm}%,description.ilike.%${libraryTerm}%,category.ilike.%${libraryTerm}%`,
       );
     }
 
@@ -259,9 +264,9 @@ export class BrandsController {
   async streamBrandLogo(
     @Headers('authorization') authorization: string | undefined,
     @Param('slug') slug: string,
-    @Res({ passthrough: true }) response: Response,
+    @Res() response: Response,
   ) {
-    await this.supabase.getUserFromBearer(authorization);
+    await this.auth.requireMember(authorization);
 
     const brand = await this.getBrandBySlug(slug);
 
@@ -269,21 +274,12 @@ export class BrandsController {
       throw new NotFoundException('Brand logo not available.');
     }
 
-    const { data, error } = await this.supabase.admin.storage
-      .from(brand.logo_bucket)
-      .download(brand.logo_path);
-
-    if (error || !data) {
-      throw new NotFoundException('Brand logo not available.');
-    }
-
-    response.set({
-      'Cache-Control': 'private, max-age=300',
-      'Content-Type': data.type || 'application/octet-stream',
-      'X-Content-Type-Options': 'nosniff',
-      'X-Robots-Tag': 'noindex, nofollow, noarchive',
+    await this.storage.pipeTo(response, {
+      bucket: brand.logo_bucket,
+      path: brand.logo_path,
+      fileName: brand.logo_path.split('/').pop() ?? `${brand.slug}-logo`,
+      disposition: 'inline',
+      cacheControl: 'private, max-age=300',
     });
-
-    return new StreamableFile(Buffer.from(await data.arrayBuffer()));
   }
 }

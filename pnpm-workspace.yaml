@@ -1,0 +1,14 @@
+# Not a workspace — pnpm 11 reads install settings from this file.
+#
+# pnpm blocks dependency build scripts by default and, since v11, treats a
+# blocked script as a hard error (ERR_PNPM_IGNORED_BUILDS) rather than a
+# warning. Both packages below are devDependencies with native postinstall
+# steps: @parcel/watcher (via @nestjs/cli, for `nest start --watch`) and
+# unrs-resolver (via typescript-eslint). They must be listed here or
+# `pnpm install` exits 1 in CI.
+#
+# NOTE: the equivalent `pnpm.onlyBuiltDependencies` field in package.json is
+# NOT honoured by pnpm 11 — it must live here.
+allowBuilds:
+  "@parcel/watcher": true
+  unrs-resolver: true

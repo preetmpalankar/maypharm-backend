@@ -1,16 +1,33 @@
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { configureApp } from './app.setup';
+import { loadConfig } from './config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  app.enableCors({
-    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:3001')
-      .split(',')
-      .map((origin) => origin.trim()),
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['authorization', 'content-type'],
-    credentials: true,
+  // Validate configuration before Nest builds anything, so a missing variable
+  // fails the deploy with a clear message instead of a stack trace.
+  const config = loadConfig();
+  const logger = new Logger('Bootstrap');
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+    logger: config.isProduction
+      ? ['log', 'warn', 'error']
+      : ['log', 'warn', 'error', 'debug'],
   });
-  await app.listen(process.env.PORT ?? 3000, process.env.HOST ?? '0.0.0.0');
+
+  configureApp(app, config);
+
+  await app.listen(config.PORT, config.HOST);
+  logger.log(
+    `MayPharm API listening on ${config.HOST}:${config.PORT} (${config.NODE_ENV})`,
+  );
 }
-void bootstrap();
+
+bootstrap().catch((error: unknown) => {
+  // The logger may not exist if configuration failed; write straight to stderr.
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});

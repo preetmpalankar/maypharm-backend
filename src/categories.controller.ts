@@ -1,5 +1,7 @@
 import { Controller, Get, Headers, Query } from '@nestjs/common';
 import { z } from 'zod';
+import { AuthService } from './auth/auth.service';
+import { escapeFilter } from './common/validation';
 import { getMeta, getRange, paginationSchema } from './pagination';
 import { SupabaseService } from './supabase.service';
 
@@ -11,14 +13,17 @@ const listQuerySchema = paginationSchema.extend({
 
 @Controller('categories')
 export class CategoriesController {
-  constructor(private readonly supabase: SupabaseService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly supabase: SupabaseService,
+  ) {}
 
   @Get()
   async listCategories(
     @Headers('authorization') authorization: string | undefined,
     @Query() query: Record<string, string>,
   ) {
-    await this.supabase.getUserFromBearer(authorization);
+    await this.auth.requireMember(authorization);
 
     const params = listQuerySchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
@@ -31,8 +36,10 @@ export class CategoriesController {
       .order('name', { ascending: true })
       .range(from, to);
 
-    if (params.q) {
-      request = request.ilike('name', `%${params.q.replace(/[%_,()]/g, '')}%`);
+    const term = params.q ? escapeFilter(params.q) : '';
+
+    if (term) {
+      request = request.ilike('name', `%${term}%`);
     }
 
     const { data, error, count } = await request;
