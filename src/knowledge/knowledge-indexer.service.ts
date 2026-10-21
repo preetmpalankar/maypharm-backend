@@ -273,6 +273,6 @@ export class KnowledgeIndexerService {
   }
 
   static models() {
-    return { embeddingModel, graphModel };
+    return { embeddingModel, graphModel: graphModel() };
   }
 }

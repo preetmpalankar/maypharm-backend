@@ -62,7 +62,7 @@ export class KnowledgeWorkerService
 
     if (!this.indexer.configured) {
       this.logger.warn(
-        'Knowledge indexing is idle: set OPENAI_API_KEY and ANTHROPIC_API_KEY to enable it.',
+        'Knowledge indexing is idle: set OPENAI_API_KEY to enable it.',
       );
       return;
     }

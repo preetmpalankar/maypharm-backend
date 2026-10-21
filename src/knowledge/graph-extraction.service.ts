@@ -1,10 +1,13 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { Injectable } from '@nestjs/common';
+import OpenAI from 'openai';
+import { zodTextFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 import { loadConfig } from '../config';
 
-export const graphModel = 'claude-opus-5-5';
+/** The OpenAI model that extracts the graph (OPENAI_GRAPH_MODEL overrides it). */
+export function graphModel() {
+  return loadConfig().OPENAI_GRAPH_MODEL;
+}
 
 export const entityTypes = [
   'brand',
@@ -52,55 +55,52 @@ From the document, extract:
 
 Only extract what the document states. Do not add outside knowledge, infer efficacy, or create claims the text does not make. If the document has little factual content, return few or no entities.`;
 
-/** Extracts entities and relations from a document with Claude (structured output). */
+/** Extracts entities and relations from a document with OpenAI (structured output). */
 @Injectable()
 export class GraphExtractionService {
-  private client?: Anthropic;
+  private client?: OpenAI;
 
   get configured() {
-    return Boolean(loadConfig().ANTHROPIC_API_KEY);
+    return Boolean(loadConfig().OPENAI_API_KEY);
   }
 
-  private get anthropic() {
-    this.client ??= new Anthropic({
-      apiKey: loadConfig().ANTHROPIC_API_KEY,
+  private get openai() {
+    this.client ??= new OpenAI({
+      apiKey: loadConfig().OPENAI_API_KEY,
       maxRetries: 3,
+      timeout: 5 * 60_000,
     });
     return this.client;
   }
 
   async extract(document: string): Promise<ExtractedGraph> {
-    const response = await this.anthropic.beta.messages.parse({
-      model: graphModel,
-      max_tokens: 16000,
-      // Re-run on a fallback model if a safety classifier declines.
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      system: systemPrompt,
-      output_config: {
-        effort: 'medium',
-        format: betaZodOutputFormat(graphSchema),
-      },
-      messages: [
-        {
-          role: 'user',
-          content: `<document>\n${document}\n</document>\n\nExtract the knowledge graph for this document.`,
-        },
-      ],
+    const response = await this.openai.responses.parse({
+      model: graphModel(),
+      instructions: systemPrompt,
+      input: `<document>\n${document}\n</document>\n\nExtract the knowledge graph for this document.`,
+      max_output_tokens: 16000,
+      text: { format: zodTextFormat(graphSchema, 'knowledge_graph') },
     });
 
-    if (response.stop_reason === 'refusal') {
+    if (response.status === 'incomplete') {
+      throw new Error(
+        `Graph extraction was incomplete (${response.incomplete_details?.reason ?? 'unknown reason'}).`,
+      );
+    }
+
+    const refused = response.output.some(
+      (item) =>
+        item.type === 'message' &&
+        item.content.some((part) => part.type === 'refusal'),
+    );
+    if (refused) {
       throw new Error('Graph extraction was declined by the model.');
     }
 
-    if (response.stop_reason === 'max_tokens') {
-      throw new Error('Graph extraction output was cut off (max_tokens).');
-    }
-
-    if (!response.parsed_output) {
+    if (!response.output_parsed) {
       throw new Error('Graph extraction returned no parseable output.');
     }
 
-    return response.parsed_output;
+    return response.output_parsed;
   }
 }

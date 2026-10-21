@@ -15,9 +15,9 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:3001'),
   ASSET_BUCKET: z.string().min(1).default('maypharm-admin-assets'),
   // Knowledge index for the AI Assistant (background; never part of uploads).
-  // Indexing runs only when both keys are set and it isn't switched off.
+  // Indexing runs only when OPENAI_API_KEY is set and it isn't switched off.
   OPENAI_API_KEY: z.string().min(1).optional(),
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  OPENAI_GRAPH_MODEL: z.string().min(1).default('gpt-5-mini'),
   KNOWLEDGE_INDEXING: z.enum(['on', 'off']).default('on'),
 });
 
