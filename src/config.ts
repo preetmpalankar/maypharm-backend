@@ -14,6 +14,11 @@ const envSchema = z.object({
     .min(20, 'SUPABASE_SERVICE_ROLE_KEY looks truncated.'),
   CORS_ORIGINS: z.string().default('http://localhost:3001'),
   ASSET_BUCKET: z.string().min(1).default('maypharm-admin-assets'),
+  // Knowledge index for the AI Assistant (background; never part of uploads).
+  // Indexing runs only when both keys are set and it isn't switched off.
+  OPENAI_API_KEY: z.string().min(1).optional(),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  KNOWLEDGE_INDEXING: z.enum(['on', 'off']).default('on'),
 });
 
 export type AppConfig = z.infer<typeof envSchema> & {

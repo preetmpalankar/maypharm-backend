@@ -15,6 +15,10 @@ import { BrandsController } from './brands.controller';
 import { CategoriesController } from './categories.controller';
 import { AccountThrottlerGuard } from './common/account-throttler.guard';
 import { ContentController } from './content.controller';
+import { EmbeddingsService } from './knowledge/embeddings.service';
+import { GraphExtractionService } from './knowledge/graph-extraction.service';
+import { KnowledgeIndexerService } from './knowledge/knowledge-indexer.service';
+import { KnowledgeWorkerService } from './knowledge/knowledge-worker.service';
 import { AssetStorageService } from './storage/asset-storage.service';
 import { UploadSweeperService } from './storage/upload-sweeper.service';
 import { SupabaseService } from './supabase.service';
@@ -44,6 +48,10 @@ import { SupabaseService } from './supabase.service';
     AuditService,
     AssetStorageService,
     UploadSweeperService,
+    EmbeddingsService,
+    GraphExtractionService,
+    KnowledgeIndexerService,
+    KnowledgeWorkerService,
     { provide: APP_GUARD, useClass: AccountThrottlerGuard },
   ],
 })

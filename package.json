@@ -24,14 +24,20 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/throttler": "^6.7.1",
     "@supabase/supabase-js": "^2.88.0",
+    "exceljs": "^4.4.0",
     "helmet": "^8.3.0",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "openai": "^7.39.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "unpdf": "^1.9.1",
     "zod": "^4.2.1"
   },
   "devDependencies": {
