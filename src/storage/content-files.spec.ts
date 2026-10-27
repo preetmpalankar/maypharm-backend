@@ -49,12 +49,12 @@ describe('content files', () => {
     ).rejects.toThrow('Invalid file reference.');
   });
 
-  it('uploads large files to the direct storage host', () => {
+  it('sends signed resumable uploads to the signed TUS route', () => {
     expect(resumableEndpoint('https://sjdmyzreeorswiurnvze.supabase.co')).toBe(
-      'https://sjdmyzreeorswiurnvze.storage.supabase.co/storage/v1/upload/resumable',
+      'https://sjdmyzreeorswiurnvze.supabase.co/storage/v1/upload/resumable/sign',
     );
-    expect(resumableEndpoint('https://db.example.com')).toBe(
-      'https://db.example.com/storage/v1/upload/resumable',
+    expect(resumableEndpoint('https://db.example.com/')).toBe(
+      'https://db.example.com/storage/v1/upload/resumable/sign',
     );
   });
 });

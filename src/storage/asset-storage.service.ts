@@ -100,14 +100,13 @@ export function contentDisposition(
 }
 
 /**
- * Supabase's resumable upload endpoint, on the direct storage host
- * (<ref>.storage.supabase.co) when the project uses a supabase.co URL.
+ * Supabase's resumable (TUS) endpoint for uploads authorised by a signed
+ * upload token (sent as `x-signature`). Signed uploads have their own route,
+ * `/upload/resumable/sign`; the plain `/upload/resumable` route expects a
+ * user's bearer token and rejects them.
  */
 export function resumableEndpoint(projectUrl: string) {
-  const url = new URL(projectUrl);
-  const match = /^([a-z0-9]+)\.supabase\.co$/i.exec(url.hostname);
-  const host = match ? `${match[1]}.storage.supabase.co` : url.host;
-  return `${url.protocol}//${host}/storage/v1/upload/resumable`;
+  return `${new URL(projectUrl).origin}/storage/v1/upload/resumable/sign`;
 }
 
 @Injectable()
