@@ -1,6 +1,9 @@
 import {
   type AssistantSource,
   buildContext,
+  buildUserTurn,
+  formatOverview,
+  isConversational,
   citedIndexes,
   locationsIn,
   queryTerms,
@@ -55,7 +58,7 @@ describe('assistant prompt', () => {
 
   it('says so when nothing matched', () => {
     expect(buildContext([])).toBe(
-      'No approved MayPharm content matched this question.',
+      'No approved MayPharm content matched this message.',
     );
   });
 
@@ -101,5 +104,58 @@ describe('assistant prompt', () => {
   it('titles conversations from the first question', () => {
     expect(titleFrom('  What   is Calpol? ')).toBe('What is Calpol?');
     expect(titleFrom('x'.repeat(100))).toHaveLength(68);
+  });
+
+  it('treats greetings, thanks and questions about the assistant as conversation', () => {
+    for (const message of [
+      'Hi',
+      'hii',
+      'Hello!',
+      'hey there',
+      'Good morning',
+      'thanks',
+      'Thank you so much!',
+      'ok',
+      'What can you do?',
+      'who are you',
+      'Bye',
+    ]) {
+      expect(isConversational(message)).toBe(true);
+    }
+  });
+
+  it('sends real questions to the content search', () => {
+    for (const message of [
+      'Hi, what is the dose of Calpol?',
+      'What brands do we have?',
+      'Glucoryl',
+      'help me with Calpol side effects',
+      'thanks, and what about the GLYCO-301 study results',
+    ]) {
+      expect(isConversational(message)).toBe(false);
+    }
+  });
+
+  it('describes the library, or says it is empty', () => {
+    expect(formatOverview({ totalItems: 0, brands: [] })).toBe(
+      'The MayPharm library has no published content yet.',
+    );
+    expect(
+      formatOverview({
+        totalItems: 3,
+        brands: [{ name: 'Glucoryl', category: 'Diabetes', items: 3 }],
+      }),
+    ).toContain('Brands: Glucoryl (Diabetes): 3 items.');
+  });
+
+  it('marks conversational turns as not searched, and real ones with sources', () => {
+    const overview = { totalItems: 0, brands: [] };
+    expect(buildUserTurn('Hi', overview, null)).toContain(
+      'No content search was run: this message is conversational.',
+    );
+    const turn = buildUserTurn('What is Calpol?', overview, [source()]);
+    expect(turn).toContain('Approved MayPharm sources:');
+    expect(turn).toContain('[1] Calpol Product Monograph');
+    expect(turn.endsWith('User message: What is Calpol?')).toBe(true);
   });
 });

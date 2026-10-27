@@ -12,8 +12,10 @@ import { loadConfig } from '../config';
 import { SupabaseService } from '../supabase.service';
 import {
   type AssistantSource,
-  buildContext,
+  buildUserTurn,
   citedIndexes,
+  isConversational,
+  type LibraryOverview,
   systemPrompt,
   titleFrom,
   toPublicSource,
@@ -151,15 +153,22 @@ export class AssistantService {
         userMessageId: saved.id,
       },
     });
-    emit({ event: 'status', data: { stage: 'searching' } });
+    // Greetings and small talk need no content search: answer them straight away.
+    const chatty = isConversational(message);
+    const overviewPromise = this.libraryOverview();
+    let sources: AssistantSource[] = [];
 
-    // Follow-ups ("what about its side effects?") lean on the previous question.
-    const previousQuestion = [...history]
-      .reverse()
-      .find((turn) => turn.role === 'user')?.content;
-    const sources = await this.retrieval.retrieve(
-      previousQuestion ? `${previousQuestion}\n${message}` : message,
-    );
+    if (!chatty) {
+      emit({ event: 'status', data: { stage: 'searching' } });
+      // Follow-ups ("what about its side effects?") lean on the previous question.
+      const previousQuestion = [...history]
+        .reverse()
+        .find((turn) => turn.role === 'user')?.content;
+      sources = await this.retrieval.retrieve(
+        previousQuestion ? `${previousQuestion}\n${message}` : message,
+      );
+    }
+    const overview = await overviewPromise;
 
     emit({ event: 'sources', data: { sources: sources.map(toPublicSource) } });
     emit({ event: 'status', data: { stage: 'answering' } });
@@ -171,7 +180,7 @@ export class AssistantService {
       })),
       {
         role: 'user',
-        content: `Approved MayPharm sources:\n\n${buildContext(sources)}\n\n---\n\nQuestion: ${message}`,
+        content: buildUserTurn(message, overview, chatty ? null : sources),
       },
     ];
 
@@ -277,6 +286,53 @@ export class AssistantService {
         },
       });
     }
+  }
+
+  private overviewCache?: { value: LibraryOverview; at: number };
+
+  /** Brands and how much content each has; cached briefly (it changes rarely). */
+  private async libraryOverview(): Promise<LibraryOverview> {
+    if (this.overviewCache && Date.now() - this.overviewCache.at < 60_000) {
+      return this.overviewCache.value;
+    }
+
+    const db = this.supabase.admin;
+    const [brands, counts, total] = await Promise.all([
+      db
+        .from('brands')
+        .select('id,name,category')
+        .eq('status', 'active')
+        .order('sort_order', { ascending: true })
+        .limit(50),
+      db.from('brand_library_counts').select('brand_id,total_count'),
+      db
+        .from('content_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'approved'),
+    ]);
+
+    if (brands.error || counts.error || total.error) {
+      this.logger.warn('Library overview unavailable; answering without it.');
+      return { totalItems: 0, brands: [] };
+    }
+
+    const byBrand = new Map(
+      ((counts.data ?? []) as { brand_id: string; total_count: number }[]).map(
+        (row) => [row.brand_id, Number(row.total_count ?? 0)],
+      ),
+    );
+    const value: LibraryOverview = {
+      totalItems: total.count ?? 0,
+      brands: (
+        (brands.data ?? []) as { id: string; name: string; category: string }[]
+      ).map((brand) => ({
+        name: brand.name,
+        category: brand.category,
+        items: byBrand.get(brand.id) ?? 0,
+      })),
+    };
+    this.overviewCache = { value, at: Date.now() };
+    return value;
   }
 
   async listConversations(user: Principal) {

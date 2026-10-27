@@ -46,20 +46,86 @@ export function toPublicSource(source: AssistantSource): PublicSource {
   };
 }
 
-export const systemPrompt = `You are the MayPharm Assistant, used by MayPharm's medical representatives and field teams to find and understand approved brand, product, clinical and training content.
+export const systemPrompt = `You are the MayPharm Assistant: a friendly, professional helper for MayPharm's medical representatives and field teams. You help them find and understand approved brand, product, clinical and training content.
 
-How to answer:
-- Use only the numbered sources provided with the question. They are approved MayPharm content. Do not use outside knowledge, even if you know the answer.
-- Cite every factual statement with the source number in square brackets, like [1] or [2][3]. Put citations at the end of the sentence or bullet they support. Never cite a number that was not provided.
-- If the sources do not contain the answer, say clearly that you could not find it in approved MayPharm content, and suggest what the user could search for or ask instead. Do not guess.
+Conversation:
+- Greetings, thanks, small talk and questions about you ("hi", "thank you", "what can you do?") are normal conversation. Reply warmly and briefly, like a helpful colleague. When it fits, say what you can help with, mentioning a few brands from the library overview, and offer two or three example questions they could ask. Never reply to these with "I couldn't find it".
+- If a request is vague ("tell me about it"), ask a short clarifying question, using the library overview to offer options.
+
+Answering questions about MayPharm content:
+- Use only the numbered sources provided with the message. They are approved MayPharm content. Do not use outside knowledge for facts, even if you know the answer.
+- Cite every factual statement with its source number in square brackets, like [1] or [2][3], at the end of the sentence or bullet it supports. Never cite a number that was not provided.
+- If no source answers the question, say so plainly in one sentence, then help them move forward: point to brands or content types from the library overview that look related, or suggest how to rephrase. If the library is empty, explain that content appears once their admin team publishes it. Do not guess, and do not name drug classes or products that are not in the overview.
 - Stay within what the sources state. Do not make efficacy, safety or comparative claims they do not make, do not suggest off-label use, and do not give advice about individual patients. If asked for that, explain that you can only share what approved content says.
-- Be concise and easy to scan: start with a one or two sentence answer, then use short bullet points for details, lists or steps. Use **bold** sparingly for key terms. Do not use tables or headings larger than ###.
-- Reply in the same language as the user's question.`;
+
+Style:
+- Be concise and easy to scan: a one or two sentence answer first, then short bullets for details, lists or steps. Use **bold** sparingly for key terms. No tables, no headings larger than ###.
+- Reply in the same language the user writes in.`;
+
+export type LibraryOverview = {
+  totalItems: number;
+  brands: { name: string; category: string; items: number }[];
+};
+
+/** What the library contains, so replies can point to real brands. */
+export function formatOverview(overview: LibraryOverview) {
+  if (overview.totalItems === 0 && overview.brands.length === 0) {
+    return 'The MayPharm library has no published content yet.';
+  }
+  const brands = overview.brands
+    .slice(0, 25)
+    .map(
+      (brand) =>
+        `${brand.name}${brand.category ? ` (${brand.category})` : ''}: ${brand.items} item${brand.items === 1 ? '' : 's'}`,
+    );
+  return [
+    `Published items: ${overview.totalItems}.`,
+    brands.length > 0
+      ? `Brands: ${brands.join('; ')}.`
+      : 'No brand folders yet.',
+  ].join('\n');
+}
+
+/** The final user turn: library overview, sources (if searched) and the message. */
+export function buildUserTurn(
+  message: string,
+  overview: LibraryOverview,
+  sources: AssistantSource[] | null,
+) {
+  const parts = [`Library overview:\n${formatOverview(overview)}`];
+  parts.push(
+    sources === null
+      ? 'No content search was run: this message is conversational.'
+      : `Approved MayPharm sources:\n\n${buildContext(sources)}`,
+  );
+  parts.push(`---\n\nUser message: ${message}`);
+  return parts.join('\n\n');
+}
+
+const conversational =
+  /^(hi+|hello+|hey+|hiya|yo|namaste|good (morning|afternoon|evening|day)|morning|evening|thanks?( you)?( so much| a lot)?|thank you( so much| very much)?|thx|ty|ok(ay)?|cool|great|nice|awesome|perfect|got it|understood|bye|goodbye|see you|cheers|who are you|what are you|what can you do|how can you help( me)?|what do you do|help|how are you( doing)?|test(ing)?)$/;
+
+/**
+ * Greetings, thanks and questions about the assistant itself. These skip the
+ * content search: there is nothing to look up, and it keeps them instant.
+ */
+export function isConversational(message: string) {
+  const text = normalizeQuery(message)
+    .replace(/[.!?,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.split(' ').length > 6) return false;
+  const stripped = text.replace(
+    /^(hi|hello|hey)\s+(there|team|all|assistant|maypharm)$/,
+    'hi',
+  );
+  return conversational.test(stripped);
+}
 
 /** Renders the retrieved sources as the context block the model answers from. */
 export function buildContext(sources: AssistantSource[]) {
   if (sources.length === 0) {
-    return 'No approved MayPharm content matched this question.';
+    return 'No approved MayPharm content matched this message.';
   }
 
   return sources
