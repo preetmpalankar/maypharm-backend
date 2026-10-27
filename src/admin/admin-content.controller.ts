@@ -26,7 +26,7 @@ import { SupabaseService } from '../supabase.service';
 import { contentInputSchema, contentListQuerySchema } from './schemas';
 
 export const adminContentColumns =
-  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,created_at,updated_at,brand:brands(id,name,slug)';
+  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug)';
 
 type StoredFileRow = {
   id: string;
@@ -171,6 +171,7 @@ export class AdminContentController {
         status: payload.status,
         description: payload.description,
         metadata: payload.metadata,
+        ai_ingestion: payload.aiIngestion,
         ...this.fileColumns(file),
         created_by: actor.id,
         updated_by: actor.id,
@@ -196,6 +197,7 @@ export class AdminContentController {
         title: payload.title,
         contentType: payload.contentType,
         status: payload.status,
+        aiIngestion: payload.aiIngestion,
         brandId: brand?.id ?? null,
         file: file
           ? { name: file.fileName, size: file.size, mimeType: file.mimeType }
@@ -254,6 +256,7 @@ export class AdminContentController {
         status: payload.status,
         description: payload.description,
         metadata: payload.metadata,
+        ai_ingestion: payload.aiIngestion,
         ...fileChange,
         updated_by: actor.id,
         updated_at: new Date().toISOString(),
@@ -286,6 +289,7 @@ export class AdminContentController {
         title: payload.title,
         contentType: payload.contentType,
         status: payload.status,
+        aiIngestion: payload.aiIngestion,
         brandId: brand?.id ?? null,
         fileReplaced: Boolean(file),
         fileRemoved: payload.removeFile && !file,

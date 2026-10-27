@@ -220,6 +220,20 @@ export class KnowledgeWorkerService
         updated_at: now,
       };
 
+      if (outcome.kind === 'excluded') {
+        // No hash, so switching ingestion back on always rebuilds it.
+        Object.assign(update, {
+          content_hash: null,
+          chunk_count: 0,
+          entity_count: 0,
+          relation_count: 0,
+          indexed_at: null,
+        });
+        this.logger.log(
+          `Removed ${contentId} from the index (AI ingestion off).`,
+        );
+      }
+
       if (outcome.kind === 'indexed') {
         const models = KnowledgeIndexerService.models();
         Object.assign(update, {

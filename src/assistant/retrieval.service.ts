@@ -233,7 +233,9 @@ export class RetrievalService {
         'id,title,content_type,category,file_name,storage_path,brand:brands(name,slug)',
       )
       .in('id', ids)
-      .eq('status', 'approved');
+      .eq('status', 'approved')
+      // Excluded from AI ingestion: never cited, even before the worker removes its index rows.
+      .eq('ai_ingestion', true);
     if (error) throw error;
     return new Map(
       ((data ?? []) as unknown as ContentRow[]).map((row) => [row.id, row]),

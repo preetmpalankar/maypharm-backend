@@ -19,6 +19,7 @@ import { extractText } from './text-extraction';
 
 type ItemRow = IndexableItem & {
   status: string;
+  ai_ingestion: boolean;
   storage_bucket: string;
   storage_path: string | null;
   file_name: string | null;
@@ -29,6 +30,7 @@ type ItemRow = IndexableItem & {
 export type IndexOutcome =
   | { kind: 'missing' }
   | { kind: 'unchanged' }
+  | { kind: 'excluded' }
   | {
       kind: 'indexed';
       chunks: number;
@@ -69,13 +71,20 @@ export class KnowledgeIndexerService {
     const { data: item, error } = await db
       .from('content_items')
       .select(
-        'id,title,content_type,category,product_name,description,metadata,status,storage_bucket,storage_path,file_name,updated_at,brand:brands(name)',
+        'id,title,content_type,category,product_name,description,metadata,status,ai_ingestion,storage_bucket,storage_path,file_name,updated_at,brand:brands(name)',
       )
       .eq('id', contentId)
       .maybeSingle<ItemRow>();
 
     if (error) throw error;
     if (!item) return { kind: 'missing' };
+
+    // AI ingestion switched off for this item: take it out of the index.
+    if (!item.ai_ingestion) {
+      await this.writeChunks(item.id, [], []);
+      await this.writeGraph(item.id, { entities: [], relations: [] });
+      return { kind: 'excluded', version: item.updated_at };
+    }
 
     const details = describeItem({
       ...item,

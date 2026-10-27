@@ -72,6 +72,7 @@ export const contentInputSchema = z
     metadata: metadataSchema.default({}),
     uploadIntentId: z.uuid({ error: 'Invalid upload reference.' }).nullish(),
     removeFile: z.boolean().default(false),
+    aiIngestion: z.boolean().default(true),
   })
   .superRefine((payload, context) => {
     if (
