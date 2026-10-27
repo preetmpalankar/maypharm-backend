@@ -26,3 +26,18 @@ export function assetFileName(item: {
 
   return `${safeTitle}.${extension}`;
 }
+
+/**
+ * A readable title from a file name, for content saved without one:
+ * "Testoryl_XR-brochure.pdf" becomes "Testoryl XR brochure".
+ */
+export function titleFromFileName(fileName: string) {
+  const title = fileName
+    .replace(/\.[^.]+$/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+
+  return title || 'Untitled';
+}

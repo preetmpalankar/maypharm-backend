@@ -23,7 +23,7 @@ import {
   ContentFilesService,
   maxFilesPerItem,
 } from '../storage/content-files.service';
-import { assetFileName } from '../storage/asset-names';
+import { assetFileName, titleFromFileName } from '../storage/asset-names';
 import { SupabaseService } from '../supabase.service';
 import { contentInputSchema, contentListQuerySchema } from './schemas';
 
@@ -136,7 +136,11 @@ export class AdminContentController {
   ) {
     const actor = await this.auth.requireAdmin(authorization);
     const payload = contentInputSchema.parse(body);
-    const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
+    const brand = await this.getBrand(payload.brandId);
+
+    if (payload.uploadIntentIds.length === 0) {
+      throw new BadRequestException('Attach at least one file.');
+    }
 
     if (payload.uploadIntentIds.length > maxFilesPerItem) {
       throw new BadRequestException(
@@ -148,15 +152,17 @@ export class AdminContentController {
       actor.id,
       payload.uploadIntentIds,
     );
+    // No title given: name it after its first file.
+    const title = payload.title || titleFromFileName(uploads[0].fileName);
 
     const { data, error } = await this.supabase.admin
       .from('content_items')
       .insert({
-        title: payload.title,
+        title,
         content_type: payload.contentType,
         category: payload.category,
-        product_name: payload.productName ?? brand?.name ?? null,
-        brand_id: brand?.id ?? null,
+        product_name: payload.productName ?? brand.name,
+        brand_id: brand.id,
         status: payload.status,
         description: payload.description,
         metadata: payload.metadata,
@@ -192,11 +198,11 @@ export class AdminContentController {
       entityType: 'content_items',
       entityId: data.id,
       metadata: {
-        title: payload.title,
+        title,
         contentType: payload.contentType,
         status: payload.status,
         aiIngestion: payload.aiIngestion,
-        brandId: brand?.id ?? null,
+        brandId: brand.id,
         files: uploads.map((file) => ({
           name: file.fileName,
           size: file.size,
@@ -227,9 +233,7 @@ export class AdminContentController {
     await this.auth.requireAdmin(authorization);
     const payload = contentInputSchema.parse(body);
 
-    if (payload.brandId) {
-      await this.getBrand(payload.brandId);
-    }
+    await this.getBrand(payload.brandId);
 
     return { ok: true };
   }
@@ -243,18 +247,23 @@ export class AdminContentController {
     const actor = await this.auth.requireAdmin(authorization);
     const contentId = parseId(id);
     const payload = contentInputSchema.parse(body);
-    await this.getStoredItem(contentId);
-    const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
+    const existing = await this.getStoredItem(contentId);
+    const brand = await this.getBrand(payload.brandId);
+    const title = payload.title || existing.title;
 
     const current = await this.files.list(contentId);
     const removing = current.filter((file) =>
       payload.removeFileIds.includes(file.id),
     );
 
-    if (
-      current.length - removing.length + payload.uploadIntentIds.length >
-      maxFilesPerItem
-    ) {
+    const remaining =
+      current.length - removing.length + payload.uploadIntentIds.length;
+
+    if (remaining === 0) {
+      throw new BadRequestException('Keep at least one file.');
+    }
+
+    if (remaining > maxFilesPerItem) {
       throw new BadRequestException(
         `Attach at most ${maxFilesPerItem} files to one item.`,
       );
@@ -279,11 +288,11 @@ export class AdminContentController {
     const { error } = await this.supabase.admin
       .from('content_items')
       .update({
-        title: payload.title,
+        title,
         content_type: payload.contentType,
         category: payload.category,
-        product_name: payload.productName ?? brand?.name ?? null,
-        brand_id: brand?.id ?? null,
+        product_name: payload.productName ?? brand.name,
+        brand_id: brand.id,
         status: payload.status,
         description: payload.description,
         metadata: payload.metadata,
@@ -304,11 +313,11 @@ export class AdminContentController {
       entityType: 'content_items',
       entityId: contentId,
       metadata: {
-        title: payload.title,
+        title,
         contentType: payload.contentType,
         status: payload.status,
         aiIngestion: payload.aiIngestion,
-        brandId: brand?.id ?? null,
+        brandId: brand.id,
         filesAdded: uploads.map((file) => ({
           name: file.fileName,
           size: file.size,

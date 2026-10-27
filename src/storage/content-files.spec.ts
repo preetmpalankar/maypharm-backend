@@ -4,6 +4,7 @@ import {
   type AssetStorageService,
   type VerifiedUpload,
 } from './asset-storage.service';
+import { titleFromFileName } from './asset-names';
 import { ContentFilesService } from './content-files.service';
 import type { SupabaseService } from '../supabase.service';
 
@@ -56,5 +57,17 @@ describe('content files', () => {
     expect(resumableEndpoint('https://db.example.com/')).toBe(
       'https://db.example.com/storage/v1/upload/resumable/sign',
     );
+  });
+});
+
+describe('titles from file names', () => {
+  it('turns a file name into a readable title', () => {
+    expect(titleFromFileName('Testoryl_XR-brochure.pdf')).toBe(
+      'Testoryl XR brochure',
+    );
+    expect(titleFromFileName('launch  deck.final.pptx')).toBe(
+      'launch deck.final',
+    );
+    expect(titleFromFileName('.pdf')).toBe('Untitled');
   });
 });

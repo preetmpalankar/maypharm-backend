@@ -48,70 +48,58 @@ const metadataSchema = z
     ),
   );
 
-export const contentInputSchema = z
-  .object({
-    title: z
-      .string({ error: 'Title is required.' })
-      .trim()
-      .min(2, 'Title must be at least 2 characters.')
-      .max(180, 'Title must be 180 characters or fewer.'),
-    contentType: z.enum(contentTypes, { error: 'Choose a data type.' }),
-    category: z
-      .string({ error: 'Choose a category.' })
-      .trim()
-      .min(2, 'Choose a category.')
-      .max(120, 'Category must be 120 characters or fewer.'),
-    productName: optionalText(160, 'Product name'),
-    brandId: z.uuid({ error: 'Choose a valid brand folder.' }).nullish(),
-    status: z.enum(contentStatuses, { error: 'Choose a status.' }),
-    description: z
-      .string({ error: 'Summary is required.' })
-      .trim()
-      .min(10, 'Summary must be at least 10 characters.')
-      .max(2000, 'Summary must be 2000 characters or fewer.'),
-    metadata: metadataSchema.default({}),
-    /** Optional free-form details shown to users, e.g. "Pack size": "10 x 10". */
-    customFields: z
-      .array(
-        z.object({
-          label: z
-            .string({ error: 'Each custom field needs a title.' })
-            .trim()
-            .min(1, 'Each custom field needs a title.')
-            .max(80, 'Custom field titles must be 80 characters or fewer.'),
-          value: z
-            .string({ error: 'Each custom field needs a value.' })
-            .trim()
-            .min(1, 'Each custom field needs a value.')
-            .max(1000, 'Custom field values must be 1000 characters or fewer.'),
-        }),
-      )
-      .max(30, 'Add at most 30 custom fields.')
-      .default([]),
-    // Uploads to attach (in order) and attached files to remove.
-    uploadIntentIds: z
-      .array(z.uuid({ error: 'Invalid upload reference.' }))
-      .max(20, 'Attach at most 20 files to one item.')
-      .default([]),
-    removeFileIds: z
-      .array(z.uuid({ error: 'Invalid file reference.' }))
-      .max(20)
-      .default([]),
-    aiIngestion: z.boolean().default(true),
-  })
-  .superRefine((payload, context) => {
-    if (
-      payload.contentType === 'clinical' &&
-      !payload.brandId &&
-      !payload.productName
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['brandId'],
-        message: 'Clinical evidence must be filed under a brand folder.',
-      });
-    }
-  });
+export const contentInputSchema = z.object({
+  /** Optional: a new item is named after its first file; an edit keeps its title. */
+  title: z
+    .string()
+    .trim()
+    .max(180, 'Title must be 180 characters or fewer.')
+    .optional(),
+  contentType: z.enum(contentTypes, { error: 'Choose a data type.' }),
+  category: z
+    .string()
+    .trim()
+    .max(120, 'Category must be 120 characters or fewer.')
+    .default(''),
+  productName: optionalText(160, 'Product name'),
+  /** Every item is filed under a brand. */
+  brandId: z.uuid({ error: 'Choose a brand.' }),
+  status: z.enum(contentStatuses, { error: 'Choose a status.' }),
+  description: z
+    .string()
+    .trim()
+    .max(2000, 'Summary must be 2000 characters or fewer.')
+    .default(''),
+  metadata: metadataSchema.default({}),
+  /** Optional free-form details shown to users, e.g. "Pack size": "10 x 10". */
+  customFields: z
+    .array(
+      z.object({
+        label: z
+          .string({ error: 'Each custom field needs a title.' })
+          .trim()
+          .min(1, 'Each custom field needs a title.')
+          .max(80, 'Custom field titles must be 80 characters or fewer.'),
+        value: z
+          .string({ error: 'Each custom field needs a value.' })
+          .trim()
+          .min(1, 'Each custom field needs a value.')
+          .max(1000, 'Custom field values must be 1000 characters or fewer.'),
+      }),
+    )
+    .max(30, 'Add at most 30 custom fields.')
+    .default([]),
+  // Uploads to attach (in order) and attached files to remove.
+  uploadIntentIds: z
+    .array(z.uuid({ error: 'Invalid upload reference.' }))
+    .max(20, 'Attach at most 20 files to one item.')
+    .default([]),
+  removeFileIds: z
+    .array(z.uuid({ error: 'Invalid file reference.' }))
+    .max(20)
+    .default([]),
+  aiIngestion: z.boolean().default(true),
+});
 
 export const contentListQuerySchema = paginationSchema.extend({
   status: z.enum(contentStatuses).optional(),
