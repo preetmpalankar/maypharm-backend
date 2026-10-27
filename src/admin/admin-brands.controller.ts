@@ -15,6 +15,7 @@ import {
 import type { Response } from 'express';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
+import { BrandAccessService } from '../auth/brand-access.service';
 import { escapeFilter, parseId } from '../common/validation';
 import { getMeta, getRange } from '../pagination';
 import {
@@ -25,7 +26,7 @@ import { SupabaseService } from '../supabase.service';
 import { brandInputSchema, recordListQuerySchema } from './schemas';
 
 const brandColumns =
-  'id,name,slug,category,description,logo_bucket,logo_path,status,sort_order,created_at,updated_at';
+  'id,name,slug,category,description,logo_bucket,logo_path,status,sort_order,access_mode,created_at,updated_at';
 
 type BrandLogoRow = {
   id: string;
@@ -46,6 +47,7 @@ export class AdminBrandsController {
     private readonly auth: AuthService,
     private readonly supabase: SupabaseService,
     private readonly storage: AssetStorageService,
+    private readonly access: BrandAccessService,
     private readonly audit: AuditService,
   ) {}
 
@@ -83,8 +85,14 @@ export class AdminBrandsController {
       throw error;
     }
 
+    const brands = (data ?? []) as { id: string }[];
+    const people = await this.accessCounts(brands.map((brand) => brand.id));
+
     return {
-      data: data ?? [],
+      data: brands.map((brand) => ({
+        ...brand,
+        access_user_count: people.get(brand.id) ?? 0,
+      })),
       meta: getMeta(params.page, params.pageSize, count ?? 0),
     };
   }
@@ -127,7 +135,23 @@ export class AdminBrandsController {
       throw new NotFoundException('Brand not found.');
     }
 
-    return { data };
+    const { data: grants, error: grantError } = await this.supabase.admin
+      .from('brand_access')
+      .select('user_id')
+      .eq('brand_id', (data as { id: string }).id);
+
+    if (grantError) {
+      throw grantError;
+    }
+
+    return {
+      data: {
+        ...data,
+        access_user_ids: ((grants ?? []) as { user_id: string }[]).map(
+          (grant) => grant.user_id,
+        ),
+      },
+    };
   }
 
   /** Logo preview for the admin portal, including archived brands. */
@@ -172,6 +196,7 @@ export class AdminBrandsController {
         description: payload.description,
         status: payload.status,
         sort_order: payload.sortOrder,
+        access_mode: payload.accessMode,
         ...this.logoColumns(logo),
         created_by: actor.id,
         updated_by: actor.id,
@@ -187,6 +212,13 @@ export class AdminBrandsController {
       throw duplicateName(error) ?? error;
     }
 
+    const people = await this.syncAccess(
+      data.id,
+      payload.accessMode,
+      payload.accessUserIds,
+      actor.id,
+    );
+
     await this.audit.record({
       actorId: actor.id,
       action: 'brand.created',
@@ -197,6 +229,8 @@ export class AdminBrandsController {
         category: payload.category,
         status: payload.status,
         logo: Boolean(logo),
+        accessMode: payload.accessMode,
+        accessUserCount: people,
       },
     });
 
@@ -237,6 +271,7 @@ export class AdminBrandsController {
         description: payload.description,
         status: payload.status,
         sort_order: payload.sortOrder,
+        access_mode: payload.accessMode,
         ...logoChange,
         updated_by: actor.id,
       })
@@ -258,6 +293,13 @@ export class AdminBrandsController {
       ]);
     }
 
+    const people = await this.syncAccess(
+      brandId,
+      payload.accessMode,
+      payload.accessUserIds,
+      actor.id,
+    );
+
     await this.audit.record({
       actorId: actor.id,
       action: 'brand.updated',
@@ -270,10 +312,74 @@ export class AdminBrandsController {
         status: payload.status,
         logoReplaced: Boolean(logo),
         logoRemoved: payload.removeLogo && !logo,
+        accessMode: payload.accessMode,
+        accessUserCount: people,
       },
     });
 
     return { data, message: `Brand folder “${payload.name}” updated.` };
+  }
+
+  /**
+   * Makes the brand's grants match the chosen people (none when it is open to
+   * everyone), then drops cached access so the change applies at once.
+   * Returns how many people have access.
+   */
+  private async syncAccess(
+    brandId: string,
+    mode: 'everyone' | 'restricted',
+    requested: string[],
+    actorId: string,
+  ) {
+    const db = this.supabase.admin;
+    let keep: string[] = [];
+
+    if (mode === 'restricted' && requested.length) {
+      // Only real accounts; unknown ids are ignored.
+      const { data, error } = await db
+        .from('admin_profiles')
+        .select('id')
+        .in('id', [...new Set(requested)]);
+      if (error) throw error;
+      keep = ((data ?? []) as { id: string }[]).map((row) => row.id);
+    }
+
+    let removal = db.from('brand_access').delete().eq('brand_id', brandId);
+    if (keep.length)
+      removal = removal.not('user_id', 'in', `(${keep.join(',')})`);
+    const { error: removeError } = await removal;
+    if (removeError) throw removeError;
+
+    if (keep.length) {
+      const { error } = await db.from('brand_access').upsert(
+        keep.map((userId) => ({
+          brand_id: brandId,
+          user_id: userId,
+          granted_by: actorId,
+        })),
+        { onConflict: 'brand_id,user_id', ignoreDuplicates: true },
+      );
+      if (error) throw error;
+    }
+
+    this.access.invalidate();
+    return keep.length;
+  }
+
+  private async accessCounts(brandIds: string[]) {
+    const counts = new Map<string, number>();
+    if (brandIds.length === 0) return counts;
+
+    const { data, error } = await this.supabase.admin
+      .from('brand_access')
+      .select('brand_id')
+      .in('brand_id', brandIds);
+    if (error) throw error;
+
+    for (const row of (data ?? []) as { brand_id: string }[]) {
+      counts.set(row.brand_id, (counts.get(row.brand_id) ?? 0) + 1);
+    }
+    return counts;
   }
 
   private logoColumns(logo: VerifiedUpload | null) {

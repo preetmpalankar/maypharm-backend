@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { escapeFilter } from '../common/validation';
 import { EmbeddingsService } from '../knowledge/embeddings.service';
+import { visibleContentFilter } from '../auth/brand-access.service';
 import { SupabaseService } from '../supabase.service';
 import {
   type AssistantSource,
@@ -64,7 +65,11 @@ export class RetrievalService {
     private readonly embeddings: EmbeddingsService,
   ) {}
 
-  async retrieve(query: string): Promise<AssistantSource[]> {
+  /** `hiddenBrandIds`: restricted brands the asker hasn't been given; never used or cited. */
+  async retrieve(
+    query: string,
+    hiddenBrandIds: string[] = [],
+  ): Promise<AssistantSource[]> {
     const [chunks, graph] = await Promise.all([
       this.searchChunks(query),
       this.searchGraph(query).catch((error: Error) => {
@@ -94,7 +99,7 @@ export class RetrievalService {
     const ids = order.slice(0, maxSources * 2);
     if (ids.length === 0) return [];
 
-    const items = await this.loadApproved(ids);
+    const items = await this.loadApproved(ids, hiddenBrandIds);
     const sources: AssistantSource[] = [];
 
     for (const id of ids) {
@@ -226,8 +231,8 @@ export class RetrievalService {
     return { contentIds, facts };
   }
 
-  private async loadApproved(ids: string[]) {
-    const { data, error } = await this.supabase.admin
+  private async loadApproved(ids: string[], hiddenBrandIds: string[]) {
+    let request = this.supabase.admin
       .from('content_items')
       .select(
         'id,title,content_type,category,file_name,storage_path,brand:brands(name,slug)',
@@ -236,6 +241,10 @@ export class RetrievalService {
       .eq('status', 'approved')
       // Excluded from AI ingestion: never cited, even before the worker removes its index rows.
       .eq('ai_ingestion', true);
+    // Content of restricted brands the asker hasn't been given is never used.
+    const visible = visibleContentFilter(hiddenBrandIds);
+    if (visible) request = request.or(visible);
+    const { data, error } = await request;
     if (error) throw error;
     return new Map(
       ((data ?? []) as unknown as ContentRow[]).map((row) => [row.id, row]),

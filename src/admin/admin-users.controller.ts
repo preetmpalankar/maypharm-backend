@@ -122,6 +122,24 @@ export class AdminUsersController {
     };
   }
 
+  /** Everyone who can sign in, unpaginated, for pickers (e.g. brand access). */
+  @Get('options')
+  async options(@Headers('authorization') authorization: string | undefined) {
+    await this.auth.requireAdmin(authorization);
+    const { data, error } = await this.supabase.admin
+      .from('admin_profiles')
+      .select('id,full_name,email,role,status')
+      .neq('status', 'suspended')
+      .order('full_name', { ascending: true })
+      .limit(2000);
+
+    if (error) {
+      throw error;
+    }
+
+    return { data: data ?? [] };
+  }
+
   @Get(':id')
   async get(
     @Headers('authorization') authorization: string | undefined,

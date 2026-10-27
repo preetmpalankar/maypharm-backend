@@ -129,6 +129,14 @@ export const brandInputSchema = z.object({
     .default(0),
   logoIntentId: z.uuid({ error: 'Invalid upload reference.' }).nullish(),
   removeLogo: z.boolean().default(false),
+  /** Everyone, or only the chosen people (and admins). */
+  accessMode: z
+    .enum(['everyone', 'restricted'], { error: 'Choose who can access it.' })
+    .default('everyone'),
+  accessUserIds: z
+    .array(z.uuid({ error: 'Invalid user.' }))
+    .max(2000, 'Too many people selected.')
+    .default([]),
 });
 
 export const categoryInputSchema = z.object({

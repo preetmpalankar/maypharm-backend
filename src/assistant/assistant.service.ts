@@ -9,6 +9,7 @@ import type { ResponseInputItem } from 'openai/resources/responses/responses';
 import { AuditService } from '../audit/audit.service';
 import type { Principal } from '../auth/auth.service';
 import { loadConfig } from '../config';
+import { BrandAccessService } from '../auth/brand-access.service';
 import { SupabaseService } from '../supabase.service';
 import {
   type AssistantSource,
@@ -52,6 +53,12 @@ type MessageRow = { role: 'user' | 'assistant'; content: string };
  * sources, streams a grounded, cited answer, and keeps the conversation and
  * what it cited (for compliance review).
  */
+type OverviewData = {
+  total: number;
+  brands: { id: string; name: string; category: string }[];
+  items: { content_type: string; brand_id: string | null }[];
+};
+
 @Injectable()
 export class AssistantService {
   private readonly logger = new Logger('Assistant');
@@ -60,6 +67,7 @@ export class AssistantService {
   constructor(
     private readonly supabase: SupabaseService,
     private readonly retrieval: RetrievalService,
+    private readonly access: BrandAccessService,
     private readonly audit: AuditService,
   ) {}
 
@@ -155,7 +163,8 @@ export class AssistantService {
     });
     // Greetings and small talk need no content search: answer them straight away.
     const chatty = isConversational(message);
-    const overviewPromise = this.libraryOverview();
+    const hidden = await this.access.hiddenBrandIds(user);
+    const overviewPromise = this.libraryOverview(hidden);
     let sources: AssistantSource[] = [];
 
     if (!chatty) {
@@ -166,6 +175,7 @@ export class AssistantService {
         .find((turn) => turn.role === 'user')?.content;
       sources = await this.retrieval.retrieve(
         previousQuestion ? `${previousQuestion}\n${message}` : message,
+        hidden,
       );
     }
     const overview = await overviewPromise;
@@ -288,58 +298,77 @@ export class AssistantService {
     }
   }
 
-  private overviewCache?: { value: LibraryOverview; at: number };
+  private overviewCache?: { value: OverviewData; at: number };
 
-  /** Brands and how much content each has; cached briefly (it changes rarely). */
-  private async libraryOverview(): Promise<LibraryOverview> {
+  /**
+   * Brands and how much content each has, as the asker may see them: brands
+   * restricted away from them are left out, along with their content counts.
+   * The underlying data is cached briefly (it changes rarely).
+   */
+  private async libraryOverview(
+    hiddenBrandIds: string[],
+  ): Promise<LibraryOverview> {
+    const data = await this.overviewData();
+    if (!data) return { totalItems: 0, byType: {}, brands: [] };
+
+    const hidden = new Set(hiddenBrandIds);
+    const items = data.items.filter(
+      (item) => !item.brand_id || !hidden.has(item.brand_id),
+    );
+    const byType: Record<string, number> = {};
+    const byBrand = new Map<string, number>();
+    for (const item of items) {
+      byType[item.content_type] = (byType[item.content_type] ?? 0) + 1;
+      if (item.brand_id)
+        byBrand.set(item.brand_id, (byBrand.get(item.brand_id) ?? 0) + 1);
+    }
+
+    return {
+      totalItems: hidden.size ? items.length : data.total,
+      byType,
+      brands: data.brands
+        .filter((brand) => !hidden.has(brand.id))
+        .map((brand) => ({
+          name: brand.name,
+          category: brand.category,
+          items: byBrand.get(brand.id) ?? 0,
+        })),
+    };
+  }
+
+  private async overviewData(): Promise<OverviewData | null> {
     if (this.overviewCache && Date.now() - this.overviewCache.at < 60_000) {
       return this.overviewCache.value;
     }
 
     const db = this.supabase.admin;
-    const [brands, counts, total, types] = await Promise.all([
+    const [brands, total, items] = await Promise.all([
       db
         .from('brands')
         .select('id,name,category')
         .eq('status', 'active')
         .order('sort_order', { ascending: true })
         .limit(50),
-      db.from('brand_library_counts').select('brand_id,total_count'),
       db
         .from('content_items')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'approved'),
       db
         .from('content_items')
-        .select('content_type')
+        .select('content_type,brand_id')
         .eq('status', 'approved')
         .limit(5000),
     ]);
 
-    if (brands.error || counts.error || total.error || types.error) {
+    if (brands.error || total.error || items.error) {
       this.logger.warn('Library overview unavailable; answering without it.');
-      return { totalItems: 0, byType: {}, brands: [] };
+      return null;
     }
 
-    const byBrand = new Map(
-      ((counts.data ?? []) as { brand_id: string; total_count: number }[]).map(
-        (row) => [row.brand_id, Number(row.total_count ?? 0)],
-      ),
-    );
-    const byType: Record<string, number> = {};
-    for (const row of (types.data ?? []) as { content_type: string }[]) {
-      byType[row.content_type] = (byType[row.content_type] ?? 0) + 1;
-    }
-    const value: LibraryOverview = {
-      totalItems: total.count ?? 0,
-      byType,
-      brands: (
-        (brands.data ?? []) as { id: string; name: string; category: string }[]
-      ).map((brand) => ({
-        name: brand.name,
-        category: brand.category,
-        items: byBrand.get(brand.id) ?? 0,
-      })),
+    const value: OverviewData = {
+      total: total.count ?? 0,
+      brands: brands.data ?? [],
+      items: items.data ?? [],
     };
     this.overviewCache = { value, at: Date.now() };
     return value;

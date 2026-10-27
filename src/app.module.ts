@@ -13,6 +13,7 @@ import { AssistantService } from './assistant/assistant.service';
 import { RetrievalService } from './assistant/retrieval.service';
 import { AuditService } from './audit/audit.service';
 import { AuthService } from './auth/auth.service';
+import { BrandAccessService } from './auth/brand-access.service';
 import { BookmarksController } from './bookmarks.controller';
 import { BrandsController } from './brands.controller';
 import { CategoriesController } from './categories.controller';
@@ -50,6 +51,7 @@ import { SupabaseService } from './supabase.service';
   providers: [
     SupabaseService,
     AuthService,
+    BrandAccessService,
     AuditService,
     AssetStorageService,
     ContentFilesService,

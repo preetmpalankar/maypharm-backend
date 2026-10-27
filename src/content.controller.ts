@@ -11,6 +11,10 @@ import type { Response } from 'express';
 import { z } from 'zod';
 import { AuditService } from './audit/audit.service';
 import { AuthService } from './auth/auth.service';
+import {
+  BrandAccessService,
+  visibleContentFilter,
+} from './auth/brand-access.service';
 import { escapeFilter, parseId } from './common/validation';
 import { getMeta, getRange, paginationSchema } from './pagination';
 import { assetFileName } from './storage/asset-names';
@@ -46,6 +50,7 @@ type AssetRow = {
   id: string;
   title: string;
   status: string;
+  brand_id: string | null;
   storage_bucket: string;
   storage_path: string | null;
   file_name: string | null;
@@ -58,6 +63,7 @@ export class ContentController {
     private readonly supabase: SupabaseService,
     private readonly storage: AssetStorageService,
     private readonly files: ContentFilesService,
+    private readonly access: BrandAccessService,
     private readonly audit: AuditService,
   ) {}
 
@@ -82,7 +88,8 @@ export class ContentController {
     @Headers('authorization') authorization: string | undefined,
     @Query() query: Record<string, string>,
   ) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
+    const hidden = await this.access.hiddenBrandIds(viewer);
 
     const params = publicContentQuerySchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
@@ -93,7 +100,7 @@ export class ContentController {
     if (params.brand) {
       brandId = await this.getBrandIdBySlug(params.brand);
 
-      if (!brandId) {
+      if (!brandId || hidden.includes(brandId)) {
         return {
           data: [],
           meta: getMeta(params.page, params.pageSize, 0),
@@ -115,6 +122,12 @@ export class ContentController {
 
     if (brandId) {
       request = request.eq('brand_id', brandId);
+    }
+
+    // Restricted brands this person hasn't been given stay out of every list.
+    const visible = visibleContentFilter(hidden);
+    if (visible) {
+      request = request.or(visible);
     }
 
     if (params.q) {
@@ -142,15 +155,20 @@ export class ContentController {
   /** Published counts per type plus the newest items, for the home screen. */
   @Get('summary')
   async summary(@Headers('authorization') authorization: string | undefined) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
+    const visible = visibleContentFilter(
+      await this.access.hiddenBrandIds(viewer),
+    );
 
     const counts = await Promise.all(
       contentTypes.map(async (type) => {
-        const { count, error } = await this.supabase.admin
+        let request = this.supabase.admin
           .from('content_items')
           .select('id', { count: 'exact', head: true })
           .eq('status', 'approved')
           .eq('content_type', type);
+        if (visible) request = request.or(visible);
+        const { count, error } = await request;
 
         if (error) {
           throw error;
@@ -160,13 +178,15 @@ export class ContentController {
       }),
     );
 
-    const { data: latest, error } = await this.supabase.admin
+    let latestRequest = this.supabase.admin
       .from('content_items')
       .select(contentColumns)
       .eq('status', 'approved')
       .order('updated_at', { ascending: false })
       .order('id', { ascending: false })
       .limit(4);
+    if (visible) latestRequest = latestRequest.or(visible);
+    const { data: latest, error } = await latestRequest;
 
     if (error) {
       throw error;
@@ -191,14 +211,14 @@ export class ContentController {
     @Headers('authorization') authorization: string | undefined,
     @Param('id') id: string,
   ) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
 
     const { data, error } = await this.supabase.admin
       .from('content_items')
       .select(contentColumns)
       .eq('id', parseId(id))
       .eq('status', 'approved')
-      .maybeSingle<{ id: string }>();
+      .maybeSingle<{ id: string; brand_id: string | null }>();
 
     if (error) {
       throw error;
@@ -207,6 +227,8 @@ export class ContentController {
     if (!data) {
       throw new NotFoundException('Content not available.');
     }
+
+    await this.access.assertVisible(viewer, data.brand_id);
 
     const [withFiles] = await this.files.withFiles([data]);
     return { data: withFiles };
@@ -224,7 +246,7 @@ export class ContentController {
     const viewer = await this.auth.requireMember(authorization);
     const { data: item, error } = await this.supabase.admin
       .from('content_items')
-      .select('id,title,status,storage_bucket,storage_path,file_name')
+      .select('id,title,status,brand_id,storage_bucket,storage_path,file_name')
       .eq('id', parseId(id))
       .maybeSingle<AssetRow>();
 
@@ -235,6 +257,8 @@ export class ContentController {
     if (!item || item.status !== 'approved') {
       throw new NotFoundException('Asset not available.');
     }
+
+    await this.access.assertVisible(viewer, item.brand_id);
 
     // `?file=<id>` picks one of the item's files; without it, the first.
     const file = await this.files.resolve(item.id, fileId);

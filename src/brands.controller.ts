@@ -9,7 +9,8 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
-import { AuthService } from './auth/auth.service';
+import { AuthService, type Principal } from './auth/auth.service';
+import { BrandAccessService } from './auth/brand-access.service';
 import { brandLibraries, brandLibraryKeys } from './brand-libraries';
 import { escapeFilter } from './common/validation';
 import { getMeta, getRange, paginationSchema } from './pagination';
@@ -67,6 +68,7 @@ export class BrandsController {
     private readonly auth: AuthService,
     private readonly supabase: SupabaseService,
     private readonly storage: AssetStorageService,
+    private readonly access: BrandAccessService,
   ) {}
 
   private async getCountsByBrand(brandIds: string[]) {
@@ -97,7 +99,8 @@ export class BrandsController {
     return counts;
   }
 
-  private async getBrandBySlug(slug: string) {
+  /** An active brand this person may see; anything else is a 404. */
+  private async getBrandBySlug(slug: string, viewer: Principal) {
     const brandSlug = slugSchema.parse(slug);
     const { data, error } = await this.supabase.admin
       .from('brands')
@@ -110,7 +113,7 @@ export class BrandsController {
       throw error;
     }
 
-    if (!data) {
+    if (!data || (await this.access.hiddenBrandIds(viewer)).includes(data.id)) {
       throw new NotFoundException('Brand not found.');
     }
 
@@ -122,10 +125,11 @@ export class BrandsController {
     @Headers('authorization') authorization: string | undefined,
     @Query() query: Record<string, string>,
   ) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
 
     const params = brandListQuerySchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
+    const hidden = await this.access.hiddenBrandIds(viewer);
 
     let request = this.supabase.admin
       .from('brands')
@@ -147,6 +151,11 @@ export class BrandsController {
 
     if (categoryTerm) {
       request = request.ilike('category', categoryTerm);
+    }
+
+    // Restricted brands this person hasn't been given are not listed at all.
+    if (hidden.length) {
+      request = request.not('id', 'in', `(${hidden.join(',')})`);
     }
 
     const { data, error, count } = await request;
@@ -171,13 +180,20 @@ export class BrandsController {
   async listCategories(
     @Headers('authorization') authorization: string | undefined,
   ) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
 
-    const { data, error } = await this.supabase.admin
+    const hidden = await this.access.hiddenBrandIds(viewer);
+    let request = this.supabase.admin
       .from('brands')
       .select('category')
       .eq('status', 'active')
       .order('category', { ascending: true });
+
+    if (hidden.length) {
+      request = request.not('id', 'in', `(${hidden.join(',')})`);
+    }
+
+    const { data, error } = await request;
 
     if (error) {
       throw error;
@@ -201,9 +217,9 @@ export class BrandsController {
     @Headers('authorization') authorization: string | undefined,
     @Param('slug') slug: string,
   ) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
 
-    const brand = await this.getBrandBySlug(slug);
+    const brand = await this.getBrandBySlug(slug, viewer);
     const counts = await this.getCountsByBrand([brand.id]);
 
     return {
@@ -221,10 +237,10 @@ export class BrandsController {
     @Param('library') library: string,
     @Query() query: Record<string, string>,
   ) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
 
     const libraryKey = librarySchema.parse(library);
-    const brand = await this.getBrandBySlug(slug);
+    const brand = await this.getBrandBySlug(slug, viewer);
     const params = libraryQuerySchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
 
@@ -266,9 +282,9 @@ export class BrandsController {
     @Param('slug') slug: string,
     @Res() response: Response,
   ) {
-    await this.auth.requireMember(authorization);
+    const viewer = await this.auth.requireMember(authorization);
 
-    const brand = await this.getBrandBySlug(slug);
+    const brand = await this.getBrandBySlug(slug, viewer);
 
     if (!brand.logo_path) {
       throw new NotFoundException('Brand logo not available.');

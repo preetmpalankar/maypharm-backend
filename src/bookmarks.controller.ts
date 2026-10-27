@@ -9,6 +9,10 @@ import {
   Query,
 } from '@nestjs/common';
 import { AuthService } from './auth/auth.service';
+import {
+  BrandAccessService,
+  visibleContentFilter,
+} from './auth/brand-access.service';
 import { parseId } from './common/validation';
 import { getMeta, getRange, paginationSchema } from './pagination';
 import { SupabaseService } from './supabase.service';
@@ -34,6 +38,7 @@ export class BookmarksController {
   constructor(
     private readonly auth: AuthService,
     private readonly supabase: SupabaseService,
+    private readonly access: BrandAccessService,
   ) {}
 
   /** Saved items, newest first, with the same fields as /content. */
@@ -46,7 +51,10 @@ export class BookmarksController {
     const params = paginationSchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
 
-    const { data, error, count } = await this.supabase.admin
+    const visible = visibleContentFilter(
+      await this.access.hiddenBrandIds(viewer),
+    );
+    let request = this.supabase.admin
       .from('content_bookmarks')
       .select(`created_at,content:content_items!inner(${contentColumns})`, {
         count: 'exact',
@@ -56,6 +64,13 @@ export class BookmarksController {
       .order('created_at', { ascending: false })
       .order('content_id', { ascending: false })
       .range(from, to);
+
+    // Saved items of a brand this person no longer has access to drop out.
+    if (visible) {
+      request = request.or(visible, { referencedTable: 'content' });
+    }
+
+    const { data, error, count } = await request;
 
     if (error) {
       throw error;
@@ -78,12 +93,21 @@ export class BookmarksController {
   ) {
     const viewer = await this.auth.requireMember(authorization);
 
-    const { data, error } = await this.supabase.admin
+    const visible = visibleContentFilter(
+      await this.access.hiddenBrandIds(viewer),
+    );
+    let request = this.supabase.admin
       .from('content_bookmarks')
-      .select('content_id,content:content_items!inner(status)')
+      .select('content_id,content:content_items!inner(status,brand_id)')
       .eq('user_id', viewer.id)
       .eq('content.status', 'approved')
       .limit(maxBookmarkIds);
+
+    if (visible) {
+      request = request.or(visible, { referencedTable: 'content' });
+    }
+
+    const { data, error } = await request;
 
     if (error) {
       throw error;
@@ -107,10 +131,10 @@ export class BookmarksController {
 
     const { data: item, error: lookupError } = await this.supabase.admin
       .from('content_items')
-      .select('id')
+      .select('id,brand_id')
       .eq('id', id)
       .eq('status', 'approved')
-      .maybeSingle();
+      .maybeSingle<{ id: string; brand_id: string | null }>();
 
     if (lookupError) {
       throw lookupError;
@@ -119,6 +143,8 @@ export class BookmarksController {
     if (!item) {
       throw new NotFoundException('Content not available.');
     }
+
+    await this.access.assertVisible(viewer, item.brand_id);
 
     const { error } = await this.supabase.admin
       .from('content_bookmarks')
