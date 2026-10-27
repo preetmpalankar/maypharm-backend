@@ -28,7 +28,7 @@ import { SupabaseService } from '../supabase.service';
 import { contentInputSchema, contentListQuerySchema } from './schemas';
 
 export const adminContentColumns =
-  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,custom_fields,tab_id,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug)';
+  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,custom_fields,tab_id,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug),tab:content_tabs(id,name)';
 
 type StoredItemRow = { id: string; title: string };
 
@@ -137,7 +137,9 @@ export class AdminContentController {
     const actor = await this.auth.requireAdmin(authorization);
     const payload = contentInputSchema.parse(body);
     const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
-    await this.assertTab(payload.tabId);
+    await this.assertTab(
+      payload.contentType === 'custom' ? payload.tabId : null,
+    );
 
     if (payload.uploadIntentIds.length > maxFilesPerItem) {
       throw new BadRequestException(
@@ -162,7 +164,9 @@ export class AdminContentController {
         description: payload.description,
         metadata: payload.metadata,
         custom_fields: payload.customFields,
-        tab_id: payload.tabId ?? null,
+        // Only custom data types point at one.
+        tab_id:
+          payload.contentType === 'custom' ? (payload.tabId ?? null) : null,
         ai_ingestion: payload.aiIngestion,
         created_by: actor.id,
         updated_by: actor.id,
@@ -232,7 +236,9 @@ export class AdminContentController {
     if (payload.brandId) {
       await this.getBrand(payload.brandId);
     }
-    await this.assertTab(payload.tabId);
+    await this.assertTab(
+      payload.contentType === 'custom' ? payload.tabId : null,
+    );
 
     return { ok: true };
   }
@@ -248,7 +254,9 @@ export class AdminContentController {
     const payload = contentInputSchema.parse(body);
     await this.getStoredItem(contentId);
     const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
-    await this.assertTab(payload.tabId);
+    await this.assertTab(
+      payload.contentType === 'custom' ? payload.tabId : null,
+    );
 
     const current = await this.files.list(contentId);
     const removing = current.filter((file) =>
@@ -292,7 +300,9 @@ export class AdminContentController {
         description: payload.description,
         metadata: payload.metadata,
         custom_fields: payload.customFields,
-        tab_id: payload.tabId ?? null,
+        // Only custom data types point at one.
+        tab_id:
+          payload.contentType === 'custom' ? (payload.tabId ?? null) : null,
         ai_ingestion: payload.aiIngestion,
         updated_by: actor.id,
         updated_at: new Date().toISOString(),
@@ -416,7 +426,7 @@ export class AdminContentController {
     return data;
   }
 
-  /** The chosen custom tab must exist (an archived one can stay selected). */
+  /** The chosen custom data type must exist (an archived one can stay selected). */
   private async assertTab(tabId: string | null | undefined) {
     if (!tabId) return;
 
@@ -431,7 +441,7 @@ export class AdminContentController {
     }
 
     if (!data) {
-      throw new BadRequestException('The selected tab no longer exists.');
+      throw new BadRequestException('The selected data type no longer exists.');
     }
   }
 

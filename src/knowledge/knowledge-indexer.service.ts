@@ -25,6 +25,7 @@ type ItemRow = IndexableItem & {
   file_name: string | null;
   updated_at: string;
   brand: { name: string } | null;
+  tab: { name: string } | null;
 };
 
 export type IndexOutcome =
@@ -87,7 +88,7 @@ export class KnowledgeIndexerService {
     const { data: item, error } = await db
       .from('content_items')
       .select(
-        'id,title,content_type,category,product_name,description,metadata,custom_fields,status,ai_ingestion,storage_bucket,storage_path,file_name,updated_at,brand:brands(name)',
+        'id,title,content_type,category,product_name,description,metadata,custom_fields,status,ai_ingestion,storage_bucket,storage_path,file_name,updated_at,brand:brands(name),tab:content_tabs(name)',
       )
       .eq('id', contentId)
       .maybeSingle<ItemRow>();
@@ -104,6 +105,8 @@ export class KnowledgeIndexerService {
 
     const details = describeItem({
       ...item,
+      // A custom data type is indexed by its name, not "custom".
+      content_type: item.tab?.name ?? item.content_type,
       brand_name: item.brand?.name ?? null,
     });
     const extracted = await this.readFiles(item);
@@ -114,7 +117,7 @@ export class KnowledgeIndexerService {
       return { kind: 'unchanged', hash, version: item.updated_at };
     }
 
-    const header = `[${item.title} | ${item.content_type}${item.brand?.name ? ` | ${item.brand.name}` : ''}]`;
+    const header = `[${item.title} | ${item.tab?.name ?? item.content_type}${item.brand?.name ? ` | ${item.brand.name}` : ''}]`;
     const document = extracted.text
       ? `${details}\n\n${extracted.text}`
       : details;

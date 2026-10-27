@@ -20,7 +20,7 @@ import { SupabaseService } from './supabase.service';
 const brandColumns =
   'id,name,slug,category,description,logo_bucket,logo_path,sort_order,updated_at';
 const contentColumns =
-  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at';
+  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at,tab:content_tabs(name)';
 
 const slugSchema = z
   .string()
@@ -110,7 +110,7 @@ export class BrandsController {
     return counts;
   }
 
-  /** Every active custom tab, in order, with how many approved items this brand has in each. */
+  /** The custom data types this brand has approved content of, in order, with counts. */
   private async getTabsForBrand(brandId: string) {
     const [tabs, items] = await Promise.all([
       this.supabase.admin
@@ -134,12 +134,15 @@ export class BrandsController {
       counts.set(row.tab_id, (counts.get(row.tab_id) ?? 0) + 1);
     }
 
-    return ((tabs.data ?? []) as TabRow[]).map((tab) => ({
-      key: tab.slug,
-      label: tab.name,
-      description: tab.description,
-      count: counts.get(tab.id) ?? 0,
-    }));
+    // A custom data type only shows under a brand that has content of it.
+    return ((tabs.data ?? []) as TabRow[])
+      .filter((tab) => (counts.get(tab.id) ?? 0) > 0)
+      .map((tab) => ({
+        key: tab.slug,
+        label: tab.name,
+        description: tab.description,
+        count: counts.get(tab.id) ?? 0,
+      }));
   }
 
   /** An active custom tab by slug, or a 404. */
