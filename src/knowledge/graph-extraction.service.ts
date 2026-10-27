@@ -53,6 +53,8 @@ From the document, extract:
 - entities: brands, products, molecules (generic names), indications, conditions, clinical studies, endpoints, patient populations, dosage forms, strengths, adverse events, mechanisms of action, organizations and named people. Use the most specific type that fits; "other" only when nothing else does. Use the name as written in the document (e.g. "Paracetamol 500 mg" is a product; "Paracetamol" is a molecule). Each description is one short factual sentence from the document.
 - relations between those entities, as short lower_snake_case verbs, for example: contains_molecule, indicated_for, studied_in, has_endpoint, has_strength, has_dosage_form, causes_adverse_event, manufactured_by, compared_with, enrolled_population, has_mechanism. Source and target must be names that appear in your entities list. Evidence is a short quote or close paraphrase from the document supporting the relation.
 
+Skip file and media details that are not pharmaceutical facts: file formats, image or video dimensions, durations, file names, usage rights, years and channel names.
+
 Only extract what the document states. Do not add outside knowledge, infer efficacy, or create claims the text does not make. If the document has little factual content, return few or no entities.`;
 
 /** Extracts entities and relations from a document with OpenAI (structured output). */

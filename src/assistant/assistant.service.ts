@@ -297,7 +297,7 @@ export class AssistantService {
     }
 
     const db = this.supabase.admin;
-    const [brands, counts, total] = await Promise.all([
+    const [brands, counts, total, types] = await Promise.all([
       db
         .from('brands')
         .select('id,name,category')
@@ -309,11 +309,16 @@ export class AssistantService {
         .from('content_items')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'approved'),
+      db
+        .from('content_items')
+        .select('content_type')
+        .eq('status', 'approved')
+        .limit(5000),
     ]);
 
-    if (brands.error || counts.error || total.error) {
+    if (brands.error || counts.error || total.error || types.error) {
       this.logger.warn('Library overview unavailable; answering without it.');
-      return { totalItems: 0, brands: [] };
+      return { totalItems: 0, byType: {}, brands: [] };
     }
 
     const byBrand = new Map(
@@ -321,8 +326,13 @@ export class AssistantService {
         (row) => [row.brand_id, Number(row.total_count ?? 0)],
       ),
     );
+    const byType: Record<string, number> = {};
+    for (const row of (types.data ?? []) as { content_type: string }[]) {
+      byType[row.content_type] = (byType[row.content_type] ?? 0) + 1;
+    }
     const value: LibraryOverview = {
       totalItems: total.count ?? 0,
+      byType,
       brands: (
         (brands.data ?? []) as { id: string; name: string; category: string }[]
       ).map((brand) => ({

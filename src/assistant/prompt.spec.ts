@@ -137,19 +137,27 @@ describe('assistant prompt', () => {
   });
 
   it('describes the library, or says it is empty', () => {
-    expect(formatOverview({ totalItems: 0, brands: [] })).toBe(
+    expect(formatOverview({ totalItems: 0, byType: {}, brands: [] })).toBe(
       'The MayPharm library has no published content yet.',
     );
     expect(
       formatOverview({
         totalItems: 3,
+        byType: { product: 2, field_asset: 1 },
         brands: [{ name: 'Glucoryl', category: 'Diabetes', items: 3 }],
       }),
     ).toContain('Brands: Glucoryl (Diabetes): 3 items.');
+    expect(
+      formatOverview({
+        totalItems: 3,
+        byType: { product: 2, field_asset: 1 },
+        brands: [],
+      }),
+    ).toContain('Published items: 3 (product 2, field asset 1).');
   });
 
   it('marks conversational turns as not searched, and real ones with sources', () => {
-    const overview = { totalItems: 0, brands: [] };
+    const overview = { totalItems: 0, byType: {}, brands: [] };
     expect(buildUserTurn('Hi', overview, null)).toContain(
       'No content search was run: this message is conversational.',
     );
