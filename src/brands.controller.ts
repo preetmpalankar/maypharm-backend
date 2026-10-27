@@ -20,7 +20,7 @@ import { SupabaseService } from './supabase.service';
 const brandColumns =
   'id,name,slug,category,description,logo_bucket,logo_path,sort_order,updated_at';
 const contentColumns =
-  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at,tab:content_tabs(name)';
+  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at';
 
 const slugSchema = z
   .string()
@@ -38,18 +38,7 @@ const libraryQuerySchema = paginationSchema.extend({
   q: z.string().trim().min(2).max(80).optional(),
 });
 
-/** A built-in library key or a custom tab's slug. */
-const librarySchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(120)
-  .regex(/^[a-z0-9-]+$/, 'Invalid library.');
-
-type TabRow = { id: string; slug: string; name: string; description: string };
-
-const isBuiltIn = (key: string): key is (typeof brandLibraryKeys)[number] =>
-  (brandLibraryKeys as readonly string[]).includes(key);
+const librarySchema = z.enum(brandLibraryKeys);
 
 type BrandRow = {
   id: string;
@@ -108,61 +97,6 @@ export class BrandsController {
     }
 
     return counts;
-  }
-
-  /** The custom data types this brand has approved content of, in order, with counts. */
-  private async getTabsForBrand(brandId: string) {
-    const [tabs, items] = await Promise.all([
-      this.supabase.admin
-        .from('content_tabs')
-        .select('id,slug,name,description')
-        .eq('status', 'active')
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true }),
-      this.supabase.admin
-        .from('content_items')
-        .select('tab_id')
-        .eq('brand_id', brandId)
-        .eq('status', 'approved')
-        .not('tab_id', 'is', null),
-    ]);
-    if (tabs.error) throw tabs.error;
-    if (items.error) throw items.error;
-
-    const counts = new Map<string, number>();
-    for (const row of (items.data ?? []) as { tab_id: string }[]) {
-      counts.set(row.tab_id, (counts.get(row.tab_id) ?? 0) + 1);
-    }
-
-    // A custom data type only shows under a brand that has content of it.
-    return ((tabs.data ?? []) as TabRow[])
-      .filter((tab) => (counts.get(tab.id) ?? 0) > 0)
-      .map((tab) => ({
-        key: tab.slug,
-        label: tab.name,
-        description: tab.description,
-        count: counts.get(tab.id) ?? 0,
-      }));
-  }
-
-  /** An active custom tab by slug, or a 404. */
-  private async getTab(slug: string) {
-    const { data, error } = await this.supabase.admin
-      .from('content_tabs')
-      .select('id,slug,name,description')
-      .eq('slug', slug)
-      .eq('status', 'active')
-      .maybeSingle<TabRow>();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data) {
-      throw new NotFoundException('Library not found.');
-    }
-
-    return data;
   }
 
   /** An active brand this person may see; anything else is a 404. */
@@ -286,16 +220,12 @@ export class BrandsController {
     const viewer = await this.auth.requireMember(authorization);
 
     const brand = await this.getBrandBySlug(slug, viewer);
-    const [counts, tabs] = await Promise.all([
-      this.getCountsByBrand([brand.id]),
-      this.getTabsForBrand(brand.id),
-    ]);
+    const counts = await this.getCountsByBrand([brand.id]);
 
     return {
       data: {
         ...brand,
         counts: counts.get(brand.id) ?? emptyCounts,
-        tabs,
       },
     };
   }
@@ -313,27 +243,16 @@ export class BrandsController {
     const brand = await this.getBrandBySlug(slug, viewer);
     const params = libraryQuerySchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
-    const tab = isBuiltIn(libraryKey) ? null : await this.getTab(libraryKey);
 
     let request = this.supabase.admin
       .from('content_items')
       .select(contentColumns, { count: 'exact' })
       .eq('brand_id', brand.id)
       .eq('status', 'approved')
+      .in('content_type', [...brandLibraries[libraryKey].contentTypes])
       .order('updated_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to);
-
-    // A custom tab holds what was placed in it; a built-in library holds its
-    // content types, minus anything moved into a custom tab.
-    request = tab
-      ? request.eq('tab_id', tab.id)
-      : request
-          .in('content_type', [
-            ...brandLibraries[libraryKey as keyof typeof brandLibraries]
-              .contentTypes,
-          ])
-          .is('tab_id', null);
 
     const libraryTerm = params.q ? escapeFilter(params.q) : '';
 
@@ -351,17 +270,7 @@ export class BrandsController {
 
     return {
       brand,
-      library: tab
-        ? {
-            key: tab.slug,
-            label: tab.name,
-            description: tab.description,
-            custom: true,
-          }
-        : {
-            key: libraryKey,
-            ...brandLibraries[libraryKey as keyof typeof brandLibraries],
-          },
+      library: { key: libraryKey, ...brandLibraries[libraryKey] },
       data: data ?? [],
       meta: getMeta(params.page, params.pageSize, count ?? 0),
     };

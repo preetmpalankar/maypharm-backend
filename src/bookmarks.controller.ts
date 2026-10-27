@@ -18,7 +18,7 @@ import { getMeta, getRange, paginationSchema } from './pagination';
 import { SupabaseService } from './supabase.service';
 
 const contentColumns =
-  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at,tab:content_tabs(name)';
+  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at';
 
 /** Upper bound for the id list the app uses to mark saved items. */
 const maxBookmarkIds = 2000;

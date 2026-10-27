@@ -64,8 +64,6 @@ describe('MayPharm API (e2e)', () => {
     ['GET', '/categories'],
     ['GET', '/admin/stats'],
     ['GET', '/admin/users'],
-    ['GET', '/admin/tabs'],
-    ['POST', '/admin/tabs'],
     ['POST', '/admin/uploads'],
     ['POST', '/admin/content'],
     ['POST', '/admin/content/validate'],

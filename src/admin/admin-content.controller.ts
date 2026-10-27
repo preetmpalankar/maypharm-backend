@@ -28,7 +28,7 @@ import { SupabaseService } from '../supabase.service';
 import { contentInputSchema, contentListQuerySchema } from './schemas';
 
 export const adminContentColumns =
-  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,custom_fields,tab_id,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug),tab:content_tabs(id,name)';
+  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,custom_fields,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug)';
 
 type StoredItemRow = { id: string; title: string };
 
@@ -137,9 +137,6 @@ export class AdminContentController {
     const actor = await this.auth.requireAdmin(authorization);
     const payload = contentInputSchema.parse(body);
     const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
-    await this.assertTab(
-      payload.contentType === 'custom' ? payload.tabId : null,
-    );
 
     if (payload.uploadIntentIds.length > maxFilesPerItem) {
       throw new BadRequestException(
@@ -164,9 +161,6 @@ export class AdminContentController {
         description: payload.description,
         metadata: payload.metadata,
         custom_fields: payload.customFields,
-        // Only custom data types point at one.
-        tab_id:
-          payload.contentType === 'custom' ? (payload.tabId ?? null) : null,
         ai_ingestion: payload.aiIngestion,
         created_by: actor.id,
         updated_by: actor.id,
@@ -236,9 +230,6 @@ export class AdminContentController {
     if (payload.brandId) {
       await this.getBrand(payload.brandId);
     }
-    await this.assertTab(
-      payload.contentType === 'custom' ? payload.tabId : null,
-    );
 
     return { ok: true };
   }
@@ -254,9 +245,6 @@ export class AdminContentController {
     const payload = contentInputSchema.parse(body);
     await this.getStoredItem(contentId);
     const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
-    await this.assertTab(
-      payload.contentType === 'custom' ? payload.tabId : null,
-    );
 
     const current = await this.files.list(contentId);
     const removing = current.filter((file) =>
@@ -300,9 +288,6 @@ export class AdminContentController {
         description: payload.description,
         metadata: payload.metadata,
         custom_fields: payload.customFields,
-        // Only custom data types point at one.
-        tab_id:
-          payload.contentType === 'custom' ? (payload.tabId ?? null) : null,
         ai_ingestion: payload.aiIngestion,
         updated_by: actor.id,
         updated_at: new Date().toISOString(),
@@ -424,25 +409,6 @@ export class AdminContentController {
     }
 
     return data;
-  }
-
-  /** The chosen custom data type must exist (an archived one can stay selected). */
-  private async assertTab(tabId: string | null | undefined) {
-    if (!tabId) return;
-
-    const { data, error } = await this.supabase.admin
-      .from('content_tabs')
-      .select('id')
-      .eq('id', tabId)
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data) {
-      throw new BadRequestException('The selected data type no longer exists.');
-    }
   }
 
   private async getBrand(brandId: string) {

@@ -8,8 +8,6 @@ export const contentTypes = [
   'media',
   'field_asset',
   'regulatory',
-  // An admin-created data type; the item's tabId says which one.
-  'custom',
 ] as const;
 
 export const contentStatuses = [
@@ -72,8 +70,6 @@ export const contentInputSchema = z
       .min(10, 'Summary must be at least 10 characters.')
       .max(2000, 'Summary must be 2000 characters or fewer.'),
     metadata: metadataSchema.default({}),
-    /** For a custom data type: which one. Ignored for the built-in types. */
-    tabId: z.uuid({ error: 'Choose a valid data type.' }).nullish(),
     /** Optional free-form details shown to users, e.g. "Pack size": "10 x 10". */
     customFields: z
       .array(
@@ -104,14 +100,6 @@ export const contentInputSchema = z
     aiIngestion: z.boolean().default(true),
   })
   .superRefine((payload, context) => {
-    if (payload.contentType === 'custom' && !payload.tabId) {
-      context.addIssue({
-        code: 'custom',
-        path: ['contentType'],
-        message: 'Choose or create a data type.',
-      });
-    }
-
     if (
       payload.contentType === 'clinical' &&
       !payload.brandId &&
@@ -179,28 +167,6 @@ export const categoryInputSchema = z.object({
     .string()
     .trim()
     .max(600, 'Description must be 600 characters or fewer.')
-    .default(''),
-  status: z
-    .enum(recordStatuses, { error: 'Choose a status.' })
-    .default('active'),
-  sortOrder: z.coerce
-    .number({ error: 'Sort order must be a number.' })
-    .int('Sort order must be a whole number.')
-    .min(0, 'Sort order cannot be negative.')
-    .max(9999, 'Sort order must be 9999 or less.')
-    .default(0),
-});
-
-export const tabInputSchema = z.object({
-  name: z
-    .string({ error: 'Tab name is required.' })
-    .trim()
-    .min(2, 'Tab name must be at least 2 characters.')
-    .max(60, 'Tab name must be 60 characters or fewer.'),
-  description: z
-    .string()
-    .trim()
-    .max(300, 'Description must be 300 characters or fewer.')
     .default(''),
   status: z
     .enum(recordStatuses, { error: 'Choose a status.' })

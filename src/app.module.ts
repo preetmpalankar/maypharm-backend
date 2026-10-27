@@ -3,7 +3,6 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AdminBrandsController } from './admin/admin-brands.controller';
 import { AdminCategoriesController } from './admin/admin-categories.controller';
-import { AdminTabsController } from './admin/admin-tabs.controller';
 import { AdminContentController } from './admin/admin-content.controller';
 import { AdminInsightsController } from './admin/admin-insights.controller';
 import { AdminUploadsController } from './admin/admin-uploads.controller';
@@ -45,7 +44,6 @@ import { SupabaseService } from './supabase.service';
     AdminContentController,
     AdminBrandsController,
     AdminCategoriesController,
-    AdminTabsController,
     AdminUsersController,
     AdminUploadsController,
     AdminInsightsController,
