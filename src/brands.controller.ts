@@ -38,7 +38,18 @@ const libraryQuerySchema = paginationSchema.extend({
   q: z.string().trim().min(2).max(80).optional(),
 });
 
-const librarySchema = z.enum(brandLibraryKeys);
+/** A built-in library key or a custom tab's slug. */
+const librarySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9-]+$/, 'Invalid library.');
+
+type TabRow = { id: string; slug: string; name: string; description: string };
+
+const isBuiltIn = (key: string): key is (typeof brandLibraryKeys)[number] =>
+  (brandLibraryKeys as readonly string[]).includes(key);
 
 type BrandRow = {
   id: string;
@@ -97,6 +108,58 @@ export class BrandsController {
     }
 
     return counts;
+  }
+
+  /** Every active custom tab, in order, with how many approved items this brand has in each. */
+  private async getTabsForBrand(brandId: string) {
+    const [tabs, items] = await Promise.all([
+      this.supabase.admin
+        .from('content_tabs')
+        .select('id,slug,name,description')
+        .eq('status', 'active')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true }),
+      this.supabase.admin
+        .from('content_items')
+        .select('tab_id')
+        .eq('brand_id', brandId)
+        .eq('status', 'approved')
+        .not('tab_id', 'is', null),
+    ]);
+    if (tabs.error) throw tabs.error;
+    if (items.error) throw items.error;
+
+    const counts = new Map<string, number>();
+    for (const row of (items.data ?? []) as { tab_id: string }[]) {
+      counts.set(row.tab_id, (counts.get(row.tab_id) ?? 0) + 1);
+    }
+
+    return ((tabs.data ?? []) as TabRow[]).map((tab) => ({
+      key: tab.slug,
+      label: tab.name,
+      description: tab.description,
+      count: counts.get(tab.id) ?? 0,
+    }));
+  }
+
+  /** An active custom tab by slug, or a 404. */
+  private async getTab(slug: string) {
+    const { data, error } = await this.supabase.admin
+      .from('content_tabs')
+      .select('id,slug,name,description')
+      .eq('slug', slug)
+      .eq('status', 'active')
+      .maybeSingle<TabRow>();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      throw new NotFoundException('Library not found.');
+    }
+
+    return data;
   }
 
   /** An active brand this person may see; anything else is a 404. */
@@ -220,12 +283,16 @@ export class BrandsController {
     const viewer = await this.auth.requireMember(authorization);
 
     const brand = await this.getBrandBySlug(slug, viewer);
-    const counts = await this.getCountsByBrand([brand.id]);
+    const [counts, tabs] = await Promise.all([
+      this.getCountsByBrand([brand.id]),
+      this.getTabsForBrand(brand.id),
+    ]);
 
     return {
       data: {
         ...brand,
         counts: counts.get(brand.id) ?? emptyCounts,
+        tabs,
       },
     };
   }
@@ -243,16 +310,27 @@ export class BrandsController {
     const brand = await this.getBrandBySlug(slug, viewer);
     const params = libraryQuerySchema.parse(query);
     const { from, to } = getRange(params.page, params.pageSize);
+    const tab = isBuiltIn(libraryKey) ? null : await this.getTab(libraryKey);
 
     let request = this.supabase.admin
       .from('content_items')
       .select(contentColumns, { count: 'exact' })
       .eq('brand_id', brand.id)
       .eq('status', 'approved')
-      .in('content_type', [...brandLibraries[libraryKey].contentTypes])
       .order('updated_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, to);
+
+    // A custom tab holds what was placed in it; a built-in library holds its
+    // content types, minus anything moved into a custom tab.
+    request = tab
+      ? request.eq('tab_id', tab.id)
+      : request
+          .in('content_type', [
+            ...brandLibraries[libraryKey as keyof typeof brandLibraries]
+              .contentTypes,
+          ])
+          .is('tab_id', null);
 
     const libraryTerm = params.q ? escapeFilter(params.q) : '';
 
@@ -270,7 +348,17 @@ export class BrandsController {
 
     return {
       brand,
-      library: { key: libraryKey, ...brandLibraries[libraryKey] },
+      library: tab
+        ? {
+            key: tab.slug,
+            label: tab.name,
+            description: tab.description,
+            custom: true,
+          }
+        : {
+            key: libraryKey,
+            ...brandLibraries[libraryKey as keyof typeof brandLibraries],
+          },
       data: data ?? [],
       meta: getMeta(params.page, params.pageSize, count ?? 0),
     };
