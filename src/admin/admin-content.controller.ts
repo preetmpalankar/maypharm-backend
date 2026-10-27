@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Headers,
+  HttpCode,
   NotFoundException,
   Param,
   Patch,
@@ -210,6 +211,26 @@ export class AdminContentController {
           ? 'Content saved and published to MayPharm.'
           : 'Content saved. Set the status to approved when it is ready to publish.',
     };
+  }
+
+  /**
+   * Checks a new item's details without saving anything, so the admin
+   * portal can queue it for a background upload knowing the save will pass.
+   */
+  @Post('validate')
+  @HttpCode(200)
+  async validate(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() body: unknown,
+  ) {
+    await this.auth.requireAdmin(authorization);
+    const payload = contentInputSchema.parse(body);
+
+    if (payload.brandId) {
+      await this.getBrand(payload.brandId);
+    }
+
+    return { ok: true };
   }
 
   @Patch(':id')

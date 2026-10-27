@@ -66,6 +66,7 @@ describe('MayPharm API (e2e)', () => {
     ['GET', '/admin/users'],
     ['POST', '/admin/uploads'],
     ['POST', '/admin/content'],
+    ['POST', '/admin/content/validate'],
     ['GET', '/bookmarks'],
     ['GET', '/bookmarks/ids'],
     ['PUT', '/bookmarks/00000000-0000-4000-8000-000000000000'],
