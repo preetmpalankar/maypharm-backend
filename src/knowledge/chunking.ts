@@ -12,6 +12,7 @@ export type IndexableItem = {
   product_name: string | null;
   description: string;
   metadata: Record<string, unknown> | null;
+  custom_fields?: { label: string; value: string }[] | null;
   brand_name?: string | null;
 };
 
@@ -29,6 +30,12 @@ export function describeItem(item: IndexableItem) {
   for (const [key, value] of Object.entries(item.metadata ?? {})) {
     if (typeof value === 'string' && value.trim()) {
       lines.push(`${humanize(key)}: ${value.trim()}`);
+    }
+  }
+
+  for (const field of item.custom_fields ?? []) {
+    if (field?.label?.trim() && field.value?.trim()) {
+      lines.push(`${field.label.trim()}: ${field.value.trim()}`);
     }
   }
 

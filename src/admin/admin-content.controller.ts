@@ -28,7 +28,7 @@ import { SupabaseService } from '../supabase.service';
 import { contentInputSchema, contentListQuerySchema } from './schemas';
 
 export const adminContentColumns =
-  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug)';
+  'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,custom_fields,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug)';
 
 type StoredItemRow = { id: string; title: string };
 
@@ -160,6 +160,7 @@ export class AdminContentController {
         status: payload.status,
         description: payload.description,
         metadata: payload.metadata,
+        custom_fields: payload.customFields,
         ai_ingestion: payload.aiIngestion,
         created_by: actor.id,
         updated_by: actor.id,
@@ -286,6 +287,7 @@ export class AdminContentController {
         status: payload.status,
         description: payload.description,
         metadata: payload.metadata,
+        custom_fields: payload.customFields,
         ai_ingestion: payload.aiIngestion,
         updated_by: actor.id,
         updated_at: new Date().toISOString(),

@@ -32,7 +32,7 @@ const contentTypes = [
 ] as const;
 
 const contentColumns =
-  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,updated_at';
+  'id,title,content_type,category,product_name,brand_id,description,status,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,custom_fields,updated_at';
 
 const publicContentQuerySchema = paginationSchema.extend({
   type: z.enum(contentTypes).optional(),

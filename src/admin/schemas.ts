@@ -70,6 +70,24 @@ export const contentInputSchema = z
       .min(10, 'Summary must be at least 10 characters.')
       .max(2000, 'Summary must be 2000 characters or fewer.'),
     metadata: metadataSchema.default({}),
+    /** Optional free-form details shown to users, e.g. "Pack size": "10 x 10". */
+    customFields: z
+      .array(
+        z.object({
+          label: z
+            .string({ error: 'Each custom field needs a title.' })
+            .trim()
+            .min(1, 'Each custom field needs a title.')
+            .max(80, 'Custom field titles must be 80 characters or fewer.'),
+          value: z
+            .string({ error: 'Each custom field needs a value.' })
+            .trim()
+            .min(1, 'Each custom field needs a value.')
+            .max(1000, 'Custom field values must be 1000 characters or fewer.'),
+        }),
+      )
+      .max(30, 'Add at most 30 custom fields.')
+      .default([]),
     // Uploads to attach (in order) and attached files to remove.
     uploadIntentIds: z
       .array(z.uuid({ error: 'Invalid upload reference.' }))

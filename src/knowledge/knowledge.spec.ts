@@ -29,6 +29,25 @@ describe('knowledge chunking', () => {
     expect(text).not.toContain('Count');
   });
 
+  it('indexes custom fields under their own titles', () => {
+    const text = describeItem({
+      id: 'x',
+      title: 'Testoryl XR',
+      content_type: 'product',
+      category: 'Diabetes',
+      product_name: null,
+      description: 'Extended-release tablets.',
+      metadata: {},
+      custom_fields: [
+        { label: 'Pack size (India)', value: '10 x 10 tablets' },
+        { label: '  ', value: 'ignored' },
+      ],
+    });
+
+    expect(text).toContain('Pack size (India): 10 x 10 tablets');
+    expect(text).not.toContain('ignored');
+  });
+
   it('splits long text into overlapping, headed chunks within the size limit', () => {
     const sentence = 'Patients reported improvement in the primary endpoint. ';
     const chunks = chunkText(sentence.repeat(120), '[Doc]');

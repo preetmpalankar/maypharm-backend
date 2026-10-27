@@ -87,7 +87,7 @@ export class KnowledgeIndexerService {
     const { data: item, error } = await db
       .from('content_items')
       .select(
-        'id,title,content_type,category,product_name,description,metadata,status,ai_ingestion,storage_bucket,storage_path,file_name,updated_at,brand:brands(name)',
+        'id,title,content_type,category,product_name,description,metadata,custom_fields,status,ai_ingestion,storage_bucket,storage_path,file_name,updated_at,brand:brands(name)',
       )
       .eq('id', contentId)
       .maybeSingle<ItemRow>();
