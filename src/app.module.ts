@@ -23,6 +23,7 @@ import { GraphExtractionService } from './knowledge/graph-extraction.service';
 import { KnowledgeIndexerService } from './knowledge/knowledge-indexer.service';
 import { KnowledgeWorkerService } from './knowledge/knowledge-worker.service';
 import { AssetStorageService } from './storage/asset-storage.service';
+import { ContentFilesService } from './storage/content-files.service';
 import { UploadSweeperService } from './storage/upload-sweeper.service';
 import { SupabaseService } from './supabase.service';
 
@@ -51,6 +52,7 @@ import { SupabaseService } from './supabase.service';
     AuthService,
     AuditService,
     AssetStorageService,
+    ContentFilesService,
     UploadSweeperService,
     EmbeddingsService,
     GraphExtractionService,

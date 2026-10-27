@@ -17,10 +17,11 @@ import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { escapeFilter, parseId } from '../common/validation';
 import { getMeta, getRange } from '../pagination';
+import { AssetStorageService } from '../storage/asset-storage.service';
 import {
-  AssetStorageService,
-  type VerifiedUpload,
-} from '../storage/asset-storage.service';
+  ContentFilesService,
+  maxFilesPerItem,
+} from '../storage/content-files.service';
 import { assetFileName } from '../storage/asset-names';
 import { SupabaseService } from '../supabase.service';
 import { contentInputSchema, contentListQuerySchema } from './schemas';
@@ -28,13 +29,7 @@ import { contentInputSchema, contentListQuerySchema } from './schemas';
 export const adminContentColumns =
   'id,title,content_type,category,status,product_name,brand_id,description,storage_bucket,storage_path,file_name,file_size,mime_type,metadata,ai_ingestion,created_at,updated_at,brand:brands(id,name,slug)';
 
-type StoredFileRow = {
-  id: string;
-  title: string;
-  storage_bucket: string;
-  storage_path: string | null;
-  file_name: string | null;
-};
+type StoredItemRow = { id: string; title: string };
 
 @Controller('admin/content')
 export class AdminContentController {
@@ -42,6 +37,7 @@ export class AdminContentController {
     private readonly auth: AuthService,
     private readonly supabase: SupabaseService,
     private readonly storage: AssetStorageService,
+    private readonly files: ContentFilesService,
     private readonly audit: AuditService,
   ) {}
 
@@ -90,7 +86,7 @@ export class AdminContentController {
     }
 
     return {
-      data: data ?? [],
+      data: await this.files.withFiles(data ?? []),
       meta: getMeta(params.page, params.pageSize, count ?? 0),
     };
   }
@@ -101,44 +97,32 @@ export class AdminContentController {
     @Param('id') id: string,
   ) {
     await this.auth.requireAdmin(authorization);
-    const { data, error } = await this.supabase.admin
-      .from('content_items')
-      .select(adminContentColumns)
-      .eq('id', parseId(id))
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!data) {
-      throw new NotFoundException('Content record not found.');
-    }
-
-    return { data };
+    return { data: await this.load(parseId(id)) };
   }
 
-  /** Lets admins check a file before publishing; works for every status. */
+  /**
+   * Lets admins check a file before publishing; works for every status.
+   * `?file=<id>` picks one of the item's files (default: the first).
+   */
   @Get(':id/asset')
   async streamAsset(
     @Headers('authorization') authorization: string | undefined,
     @Headers('range') range: string | undefined,
     @Param('id') id: string,
+    @Query('file') fileId: string | undefined,
     @Query('download') download: string | undefined,
     @Res() response: Response,
   ) {
     await this.auth.requireAdmin(authorization);
-    const item = await this.getStoredFile(parseId(id));
-
-    if (!item.storage_path) {
-      throw new NotFoundException('This record has no file attached.');
-    }
+    const contentId = parseId(id);
+    const item = await this.getStoredItem(contentId);
+    const file = await this.files.resolve(contentId, fileId);
 
     await this.storage.pipeTo(response, {
-      bucket: item.storage_bucket,
-      path: item.storage_path,
+      bucket: file.storage_bucket,
+      path: file.storage_path,
       range,
-      fileName: assetFileName(item),
+      fileName: assetFileName({ title: item.title, ...file }),
       disposition: download === '1' ? 'attachment' : 'inline',
       cacheControl: 'private, no-store',
     });
@@ -152,13 +136,17 @@ export class AdminContentController {
     const actor = await this.auth.requireAdmin(authorization);
     const payload = contentInputSchema.parse(body);
     const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
-    const file = payload.uploadIntentId
-      ? await this.storage.claimUpload(
-          actor.id,
-          payload.uploadIntentId,
-          'content',
-        )
-      : null;
+
+    if (payload.uploadIntentIds.length > maxFilesPerItem) {
+      throw new BadRequestException(
+        `Attach at most ${maxFilesPerItem} files to one item.`,
+      );
+    }
+
+    const uploads = await this.files.claimAll(
+      actor.id,
+      payload.uploadIntentIds,
+    );
 
     const { data, error } = await this.supabase.admin
       .from('content_items')
@@ -172,20 +160,28 @@ export class AdminContentController {
         description: payload.description,
         metadata: payload.metadata,
         ai_ingestion: payload.aiIngestion,
-        ...this.fileColumns(file),
         created_by: actor.id,
         updated_by: actor.id,
       })
-      .select(adminContentColumns)
+      .select('id')
       .single<{ id: string }>();
 
     if (error) {
-      // The file was verified but the record never existed: don't orphan it.
-      if (file) {
-        await this.storage.removeObjects(file.bucket, [file.path]);
-      }
-
+      // The files were verified but the record never existed: don't orphan them.
+      await this.files.discard(uploads);
       throw error;
+    }
+
+    try {
+      await this.files.attach(data.id, uploads, 0, actor.id);
+      await this.files.syncPrimary(data.id);
+    } catch (attachError) {
+      await this.supabase.admin
+        .from('content_items')
+        .delete()
+        .eq('id', data.id);
+      await this.files.discard(uploads);
+      throw attachError;
     }
 
     await this.audit.record({
@@ -199,14 +195,16 @@ export class AdminContentController {
         status: payload.status,
         aiIngestion: payload.aiIngestion,
         brandId: brand?.id ?? null,
-        file: file
-          ? { name: file.fileName, size: file.size, mimeType: file.mimeType }
-          : null,
+        files: uploads.map((file) => ({
+          name: file.fileName,
+          size: file.size,
+          mimeType: file.mimeType,
+        })),
       },
     });
 
     return {
-      data,
+      data: await this.load(data.id),
       message:
         payload.status === 'approved'
           ? 'Content saved and published to MayPharm.'
@@ -223,29 +221,40 @@ export class AdminContentController {
     const actor = await this.auth.requireAdmin(authorization);
     const contentId = parseId(id);
     const payload = contentInputSchema.parse(body);
-    const existing = await this.getStoredFile(contentId);
+    await this.getStoredItem(contentId);
     const brand = payload.brandId ? await this.getBrand(payload.brandId) : null;
 
-    if (payload.uploadIntentId && payload.removeFile) {
+    const current = await this.files.list(contentId);
+    const removing = current.filter((file) =>
+      payload.removeFileIds.includes(file.id),
+    );
+
+    if (
+      current.length - removing.length + payload.uploadIntentIds.length >
+      maxFilesPerItem
+    ) {
       throw new BadRequestException(
-        'Choose either a replacement file or removal, not both.',
+        `Attach at most ${maxFilesPerItem} files to one item.`,
       );
     }
 
-    const file = payload.uploadIntentId
-      ? await this.storage.claimUpload(
-          actor.id,
-          payload.uploadIntentId,
-          'content',
-        )
-      : null;
-    const fileChange = file
-      ? this.fileColumns(file)
-      : payload.removeFile
-        ? this.fileColumns(null)
-        : {};
+    const uploads = await this.files.claimAll(
+      actor.id,
+      payload.uploadIntentIds,
+    );
 
-    const { data, error } = await this.supabase.admin
+    try {
+      await this.files.attach(contentId, uploads, current.length, actor.id);
+    } catch (attachError) {
+      await this.files.discard(uploads);
+      throw attachError;
+    }
+
+    // Only once the new files are on the record are removed ones released.
+    await this.files.detach(removing);
+    await this.files.syncPrimary(contentId);
+
+    const { error } = await this.supabase.admin
       .from('content_items')
       .update({
         title: payload.title,
@@ -257,55 +266,47 @@ export class AdminContentController {
         description: payload.description,
         metadata: payload.metadata,
         ai_ingestion: payload.aiIngestion,
-        ...fileChange,
         updated_by: actor.id,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', contentId)
-      .select(adminContentColumns)
-      .single<{ id: string }>();
+      .eq('id', contentId);
 
     if (error) {
-      if (file) {
-        await this.storage.removeObjects(file.bucket, [file.path]);
-      }
-
       throw error;
-    }
-
-    // Only once the record points at the new file is the old one released.
-    if ((file || payload.removeFile) && existing.storage_path) {
-      await this.storage.removeObjects(existing.storage_bucket, [
-        existing.storage_path,
-      ]);
     }
 
     await this.audit.record({
       actorId: actor.id,
       action: 'content.updated',
       entityType: 'content_items',
-      entityId: data.id,
+      entityId: contentId,
       metadata: {
         title: payload.title,
         contentType: payload.contentType,
         status: payload.status,
         aiIngestion: payload.aiIngestion,
         brandId: brand?.id ?? null,
-        fileReplaced: Boolean(file),
-        fileRemoved: payload.removeFile && !file,
-        file: file
-          ? { name: file.fileName, size: file.size, mimeType: file.mimeType }
-          : undefined,
+        filesAdded: uploads.map((file) => ({
+          name: file.fileName,
+          size: file.size,
+          mimeType: file.mimeType,
+        })),
+        filesRemoved: removing.map((file) => file.file_name),
       },
     });
 
+    const changes = [
+      uploads.length > 0 &&
+        `${uploads.length} file${uploads.length === 1 ? '' : 's'} added`,
+      removing.length > 0 &&
+        `${removing.length} file${removing.length === 1 ? '' : 's'} removed`,
+    ].filter(Boolean);
+
     return {
-      data,
-      message: file
-        ? 'Content updated and file replaced.'
-        : payload.removeFile
-          ? 'Content updated and file removed.'
-          : 'Content updated.',
+      data: await this.load(contentId),
+      message: changes.length
+        ? `Content updated: ${changes.join(', ')}.`
+        : 'Content updated.',
     };
   }
 
@@ -316,7 +317,8 @@ export class AdminContentController {
   ) {
     const actor = await this.auth.requireAdmin(authorization);
     const contentId = parseId(id);
-    const existing = await this.getStoredFile(contentId);
+    const existing = await this.getStoredItem(contentId);
+    const files = await this.files.list(contentId);
 
     const { error } = await this.supabase.admin
       .from('content_items')
@@ -327,36 +329,53 @@ export class AdminContentController {
       throw error;
     }
 
-    await this.storage.removeObjects(existing.storage_bucket, [
-      existing.storage_path,
-    ]);
+    // The rows went with the item (cascade); release the stored objects.
+    for (const file of files) {
+      await this.storage.removeObjects(file.storage_bucket, [
+        file.storage_path,
+      ]);
+    }
+
     await this.audit.record({
       actorId: actor.id,
       action: 'content.deleted',
       entityType: 'content_items',
       entityId: contentId,
-      metadata: { title: existing.title, fileName: existing.file_name },
+      metadata: {
+        title: existing.title,
+        files: files.map((file) => file.file_name),
+      },
     });
 
     return { message: `Deleted “${existing.title}”.` };
   }
 
-  private fileColumns(file: VerifiedUpload | null) {
-    return {
-      storage_bucket: file?.bucket ?? this.storage.bucket,
-      storage_path: file?.path ?? null,
-      file_name: file?.fileName ?? null,
-      file_size: file?.size ?? null,
-      mime_type: file?.mimeType ?? null,
-    };
-  }
-
-  private async getStoredFile(contentId: string) {
+  /** One item with its files, as the admin portal shows it. */
+  private async load(contentId: string) {
     const { data, error } = await this.supabase.admin
       .from('content_items')
-      .select('id,title,storage_bucket,storage_path,file_name')
+      .select(adminContentColumns)
       .eq('id', contentId)
-      .maybeSingle<StoredFileRow>();
+      .maybeSingle<{ id: string }>();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      throw new NotFoundException('Content record not found.');
+    }
+
+    const [withFiles] = await this.files.withFiles([data]);
+    return withFiles;
+  }
+
+  private async getStoredItem(contentId: string) {
+    const { data, error } = await this.supabase.admin
+      .from('content_items')
+      .select('id,title')
+      .eq('id', contentId)
+      .maybeSingle<StoredItemRow>();
 
     if (error) {
       throw error;

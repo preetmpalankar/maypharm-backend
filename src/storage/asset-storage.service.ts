@@ -47,6 +47,14 @@ export type UploadSlot = {
   intentId: string;
   path: string;
   signedUrl: string;
+  /**
+   * For resumable (TUS) uploads, which every file over a few MB should use
+   * and anything over 5 GB must: send `token` as the `x-signature` header to
+   * `resumableEndpoint`, with `bucket` and `path` as the object metadata.
+   */
+  token: string;
+  bucket: string;
+  resumableEndpoint: string;
   mimeType: string;
   expiresAt: string;
 };
@@ -89,6 +97,17 @@ export function contentDisposition(
 ) {
   const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+/**
+ * Supabase's resumable upload endpoint, on the direct storage host
+ * (<ref>.storage.supabase.co) when the project uses a supabase.co URL.
+ */
+export function resumableEndpoint(projectUrl: string) {
+  const url = new URL(projectUrl);
+  const match = /^([a-z0-9]+)\.supabase\.co$/i.exec(url.hostname);
+  const host = match ? `${match[1]}.storage.supabase.co` : url.host;
+  return `${url.protocol}//${host}/storage/v1/upload/resumable`;
 }
 
 @Injectable()
@@ -159,6 +178,9 @@ export class AssetStorageService {
       intentId: intent.id,
       path,
       signedUrl: data.signedUrl,
+      token: data.token,
+      bucket: this.bucket,
+      resumableEndpoint: resumableEndpoint(this.supabase.url),
       mimeType: type.mime,
       expiresAt,
     };

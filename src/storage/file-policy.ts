@@ -9,6 +9,7 @@ type FileTypeRule = {
 };
 
 const megabyte = 1024 * 1024;
+const gigabyte = 1024 * megabyte;
 
 function startsWith(signature: number[]) {
   return (bytes: Uint8Array) =>
@@ -114,7 +115,8 @@ export const uploadPolicies: Record<
   { maxBytes: number; extensions: readonly string[] }
 > = {
   content: {
-    maxBytes: 50 * megabyte,
+    // Supabase Pro allows up to 50 GB per object, through resumable uploads.
+    maxBytes: 50 * gigabyte,
     extensions: [
       'pdf',
       'png',
@@ -160,7 +162,9 @@ export function describeAllowed(kind: UploadKind) {
 }
 
 export function formatMegabytes(bytes: number) {
-  return `${Math.round(bytes / megabyte)} MB`;
+  return bytes >= gigabyte
+    ? `${Math.round(bytes / gigabyte)} GB`
+    : `${Math.round(bytes / megabyte)} MB`;
 }
 
 /**

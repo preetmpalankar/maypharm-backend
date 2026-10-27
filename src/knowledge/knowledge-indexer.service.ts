@@ -39,6 +39,22 @@ export type IndexOutcome =
       method: string;
     };
 
+type FileRow = {
+  id: string;
+  storage_bucket: string;
+  storage_path: string;
+  file_name: string;
+  file_size: number | null;
+};
+
+/** File types text can be read from; images, video and audio are skipped. */
+const readableExtensions = new Set(['pdf', 'docx', 'xlsx', 'pptx', 'csv']);
+/**
+ * Larger documents are not downloaded for text extraction (the whole file is
+ * held in memory); they are indexed by their title, summary and details.
+ */
+const maxExtractBytes = 100 * 1024 * 1024;
+
 /** Graph extraction is skipped for items with almost no text (e.g. a bare image). */
 const minGraphChars = 120;
 const insertBatch = 100;
@@ -90,7 +106,7 @@ export class KnowledgeIndexerService {
       ...item,
       brand_name: item.brand?.name ?? null,
     });
-    const extracted = await this.readFile(item);
+    const extracted = await this.readFiles(item);
     const hash = contentHash([details, extracted.text]);
 
     // Nothing that feeds the index changed (e.g. only the status did).
@@ -124,17 +140,55 @@ export class KnowledgeIndexerService {
     };
   }
 
-  private async readFile(item: ItemRow) {
-    if (!item.storage_path) return { text: '', method: 'no-file' };
+  /**
+   * Text from every file attached to the item, each under its own heading.
+   * Media (nothing to read) and files too large to hold in memory are left
+   * out; the item's title, summary and details are still indexed.
+   */
+  private async readFiles(item: ItemRow) {
+    const { data: files, error } = await this.supabase.admin
+      .from('content_files')
+      .select('id,storage_bucket,storage_path,file_name,file_size')
+      .eq('content_id', item.id)
+      .order('position')
+      .returns<FileRow[]>();
+    if (error) throw error;
 
-    const extension = getExtension(item.file_name ?? item.storage_path) ?? '';
+    const parts: string[] = [];
+    const methods: string[] = [];
+
+    for (const file of files ?? []) {
+      const extension = getExtension(file.file_name || file.storage_path) ?? '';
+
+      if (!readableExtensions.has(extension)) {
+        methods.push(`skipped:${extension || 'unknown'}`);
+        continue;
+      }
+      if ((file.file_size ?? 0) > maxExtractBytes) {
+        methods.push(`too-large:${extension}`);
+        continue;
+      }
+
+      const extracted = await this.readFile(item.id, file, extension);
+      methods.push(extracted.method);
+      if (extracted.text)
+        parts.push(`File: ${file.file_name}\n${extracted.text}`);
+    }
+
+    return {
+      text: parts.join('\n\n'),
+      method: methods.length ? methods.join(',') : 'no-file',
+    };
+  }
+
+  private async readFile(contentId: string, file: FileRow, extension: string) {
     const { data, error } = await this.supabase.admin.storage
-      .from(item.storage_bucket)
-      .download(item.storage_path);
+      .from(file.storage_bucket)
+      .download(file.storage_path);
 
     if (error || !data) {
       throw new Error(
-        `Could not download the file: ${error?.message ?? 'no data'}`,
+        `Could not download ${file.file_name}: ${error?.message ?? 'no data'}`,
       );
     }
 
@@ -146,7 +200,7 @@ export class KnowledgeIndexerService {
     } catch (cause) {
       // An unreadable file still gets its title, description and details indexed.
       this.logger.warn(
-        `Text extraction failed for ${item.id} (${extension}): ${(cause as Error).message}`,
+        `Text extraction failed for ${contentId} / ${file.file_name}: ${(cause as Error).message}`,
       );
       return { text: '', method: `extract-failed:${extension}` };
     }

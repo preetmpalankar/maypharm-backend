@@ -15,6 +15,7 @@ import { escapeFilter, parseId } from './common/validation';
 import { getMeta, getRange, paginationSchema } from './pagination';
 import { assetFileName } from './storage/asset-names';
 import { AssetStorageService } from './storage/asset-storage.service';
+import { ContentFilesService } from './storage/content-files.service';
 import { SupabaseService } from './supabase.service';
 
 const contentTypes = [
@@ -56,6 +57,7 @@ export class ContentController {
     private readonly auth: AuthService,
     private readonly supabase: SupabaseService,
     private readonly storage: AssetStorageService,
+    private readonly files: ContentFilesService,
     private readonly audit: AuditService,
   ) {}
 
@@ -196,7 +198,7 @@ export class ContentController {
       .select(contentColumns)
       .eq('id', parseId(id))
       .eq('status', 'approved')
-      .maybeSingle();
+      .maybeSingle<{ id: string }>();
 
     if (error) {
       throw error;
@@ -206,7 +208,8 @@ export class ContentController {
       throw new NotFoundException('Content not available.');
     }
 
-    return { data };
+    const [withFiles] = await this.files.withFiles([data]);
+    return { data: withFiles };
   }
 
   @Get(':id/asset')
@@ -214,6 +217,7 @@ export class ContentController {
     @Headers('authorization') authorization: string | undefined,
     @Headers('range') range: string | undefined,
     @Param('id') id: string,
+    @Query('file') fileId: string | undefined,
     @Query('download') download: string | undefined,
     @Res() response: Response,
   ) {
@@ -228,9 +232,12 @@ export class ContentController {
       throw error;
     }
 
-    if (!item?.storage_path || item.status !== 'approved') {
+    if (!item || item.status !== 'approved') {
       throw new NotFoundException('Asset not available.');
     }
+
+    // `?file=<id>` picks one of the item's files; without it, the first.
+    const file = await this.files.resolve(item.id, fileId);
 
     // A video streams as dozens of range requests: audit the first one only.
     const isFirstChunk = !range || /^bytes=0-/.test(range);
@@ -241,15 +248,19 @@ export class ContentController {
         action: download === '1' ? 'asset.downloaded' : 'asset.viewed',
         entityType: 'content_items',
         entityId: item.id,
-        metadata: { title: item.title },
+        metadata: {
+          title: item.title,
+          fileId: file.id,
+          fileName: file.file_name,
+        },
       });
     }
 
     await this.storage.pipeTo(response, {
-      bucket: item.storage_bucket,
-      path: item.storage_path,
+      bucket: file.storage_bucket,
+      path: file.storage_path,
       range,
-      fileName: assetFileName(item),
+      fileName: assetFileName({ title: item.title, ...file }),
       disposition: download === '1' ? 'attachment' : 'inline',
       cacheControl: 'private, no-store, max-age=0',
     });

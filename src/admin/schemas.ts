@@ -70,8 +70,15 @@ export const contentInputSchema = z
       .min(10, 'Summary must be at least 10 characters.')
       .max(2000, 'Summary must be 2000 characters or fewer.'),
     metadata: metadataSchema.default({}),
-    uploadIntentId: z.uuid({ error: 'Invalid upload reference.' }).nullish(),
-    removeFile: z.boolean().default(false),
+    // Uploads to attach (in order) and attached files to remove.
+    uploadIntentIds: z
+      .array(z.uuid({ error: 'Invalid upload reference.' }))
+      .max(20, 'Attach at most 20 files to one item.')
+      .default([]),
+    removeFileIds: z
+      .array(z.uuid({ error: 'Invalid file reference.' }))
+      .max(20)
+      .default([]),
     aiIngestion: z.boolean().default(true),
   })
   .superRefine((payload, context) => {
