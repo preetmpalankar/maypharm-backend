@@ -70,6 +70,9 @@ describe('MayPharm API (e2e)', () => {
     ['GET', '/bookmarks/ids'],
     ['PUT', '/bookmarks/00000000-0000-4000-8000-000000000000'],
     ['DELETE', '/bookmarks/00000000-0000-4000-8000-000000000000'],
+    ['GET', '/assistant/status'],
+    ['POST', '/assistant/chat'],
+    ['GET', '/assistant/conversations'],
   ])(
     '%s %s refuses anonymous callers with a JSON 401',
     async (method, path) => {

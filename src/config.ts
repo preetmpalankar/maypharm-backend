@@ -19,6 +19,12 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_GRAPH_MODEL: z.string().min(1).default('gpt-5-mini'),
   KNOWLEDGE_INDEXING: z.enum(['on', 'off']).default('on'),
+  // AI Assistant: answers from the knowledge index (needs OPENAI_API_KEY).
+  OPENAI_ASSISTANT_MODEL: z.string().min(1).default('gpt-5-mini'),
+  // Reasoning effort for reasoning models; "none" for models without it.
+  OPENAI_ASSISTANT_REASONING: z
+    .enum(['none', 'minimal', 'low', 'medium', 'high'])
+    .default('low'),
 });
 
 export type AppConfig = z.infer<typeof envSchema> & {

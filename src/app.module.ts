@@ -8,6 +8,9 @@ import { AdminInsightsController } from './admin/admin-insights.controller';
 import { AdminUploadsController } from './admin/admin-uploads.controller';
 import { AdminUsersController } from './admin/admin-users.controller';
 import { AppController } from './app.controller';
+import { AssistantController } from './assistant/assistant.controller';
+import { AssistantService } from './assistant/assistant.service';
+import { RetrievalService } from './assistant/retrieval.service';
 import { AuditService } from './audit/audit.service';
 import { AuthService } from './auth/auth.service';
 import { BookmarksController } from './bookmarks.controller';
@@ -35,6 +38,7 @@ import { SupabaseService } from './supabase.service';
     BrandsController,
     CategoriesController,
     BookmarksController,
+    AssistantController,
     AdminContentController,
     AdminBrandsController,
     AdminCategoriesController,
@@ -52,6 +56,8 @@ import { SupabaseService } from './supabase.service';
     GraphExtractionService,
     KnowledgeIndexerService,
     KnowledgeWorkerService,
+    RetrievalService,
+    AssistantService,
     { provide: APP_GUARD, useClass: AccountThrottlerGuard },
   ],
 })
