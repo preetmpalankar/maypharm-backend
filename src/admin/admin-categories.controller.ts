@@ -2,6 +2,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   Headers,
   Logger,
@@ -227,5 +228,80 @@ export class AdminCategoriesController {
     });
 
     return { data, message: `Category “${payload.name}” updated.` };
+  }
+
+  /**
+   * Deletes a category. Only an unused one: brands and content are filed by
+   * category name, so they must be moved to another category first.
+   */
+  @Delete(':id')
+  async remove(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+  ) {
+    const actor = await this.auth.requireAdmin(authorization);
+    const categoryId = parseId(id);
+
+    const { data: existing, error: existingError } = await this.supabase.admin
+      .from('categories')
+      .select('id,name')
+      .eq('id', categoryId)
+      .maybeSingle<{ id: string; name: string }>();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (!existing) {
+      throw new NotFoundException('Category not found.');
+    }
+
+    const [content, brands] = await Promise.all([
+      this.supabase.admin
+        .from('content_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('category', existing.name),
+      this.supabase.admin
+        .from('brands')
+        .select('id', { count: 'exact', head: true })
+        .eq('category', existing.name),
+    ]);
+
+    if (content.error) throw content.error;
+    if (brands.error) throw brands.error;
+
+    const uses = [
+      brands.count
+        ? `${brands.count} brand${brands.count === 1 ? '' : 's'}`
+        : '',
+      content.count
+        ? `${content.count} content item${content.count === 1 ? '' : 's'}`
+        : '',
+    ].filter(Boolean);
+
+    if (uses.length) {
+      throw new ConflictException(
+        `“${existing.name}” is used by ${uses.join(' and ')}. Move them to another category first.`,
+      );
+    }
+
+    const { error } = await this.supabase.admin
+      .from('categories')
+      .delete()
+      .eq('id', categoryId);
+
+    if (error) {
+      throw error;
+    }
+
+    await this.audit.record({
+      actorId: actor.id,
+      action: 'category.deleted',
+      entityType: 'categories',
+      entityId: categoryId,
+      metadata: { name: existing.name },
+    });
+
+    return { message: `Category “${existing.name}” deleted.` };
   }
 }

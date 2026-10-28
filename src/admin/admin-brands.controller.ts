@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   Headers,
   NotFoundException,
@@ -318,6 +319,62 @@ export class AdminBrandsController {
     });
 
     return { data, message: `Brand folder “${payload.name}” updated.` };
+  }
+
+  /**
+   * Deletes a brand folder. Only an empty one: content filed under it must be
+   * moved to another brand or deleted first, so nothing is left without a brand.
+   */
+  @Delete(':id')
+  async remove(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') id: string,
+  ) {
+    const actor = await this.auth.requireAdmin(authorization);
+    const brandId = parseId(id);
+    const existing = await this.getBrandLogo(brandId);
+
+    const { count, error: countError } = await this.supabase.admin
+      .from('content_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('brand_id', brandId);
+
+    if (countError) {
+      throw countError;
+    }
+
+    if (count) {
+      throw new ConflictException(
+        `“${existing.name}” has ${count} content item${count === 1 ? '' : 's'}. Move ${count === 1 ? 'it' : 'them'} to another brand or delete ${count === 1 ? 'it' : 'them'} first.`,
+      );
+    }
+
+    const { error } = await this.supabase.admin
+      .from('brands')
+      .delete()
+      .eq('id', brandId);
+
+    if (error) {
+      throw error;
+    }
+
+    // Its access list went with it (cascade); release the logo and cached access.
+    if (existing.logo_path) {
+      await this.storage.removeObjects(existing.logo_bucket, [
+        existing.logo_path,
+      ]);
+    }
+    this.access.invalidate();
+
+    await this.audit.record({
+      actorId: actor.id,
+      action: 'brand.deleted',
+      entityType: 'brands',
+      entityId: brandId,
+      metadata: { name: existing.name },
+    });
+
+    return { message: `Brand folder “${existing.name}” deleted.` };
   }
 
   /**
