@@ -1,11 +1,11 @@
 /**
- * Every brand folder exposes the same three libraries. Each one maps onto the
+ * Every brand folder exposes the same four libraries. Each one maps onto the
  * existing content_type enum so brand navigation and the global type-based
  * views stay backed by a single content table.
  */
 export const brandLibraries = {
   product: {
-    label: 'Product Library',
+    label: 'Visual Ads',
     description: 'Visual ads, labels and marketing material',
     contentTypes: ['product', 'field_asset'],
   },
@@ -13,6 +13,11 @@ export const brandLibraries = {
     label: 'Clinical Evidence',
     description: 'Brand confidential docs and clinical literature',
     contentTypes: ['clinical', 'regulatory'],
+  },
+  academy: {
+    label: 'Learning Academy',
+    description: 'Training modules and detailing skills',
+    contentTypes: ['academy'],
   },
   media: {
     label: 'Media Library',

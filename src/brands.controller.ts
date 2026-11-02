@@ -57,10 +57,11 @@ type CountRow = {
   product_count: number;
   clinical_count: number;
   media_count: number;
+  academy_count: number;
   total_count: number;
 };
 
-const emptyCounts = { product: 0, clinical: 0, media: 0, total: 0 };
+const emptyCounts = { product: 0, clinical: 0, academy: 0, media: 0, total: 0 };
 
 @Controller('brands')
 export class BrandsController {
@@ -80,7 +81,9 @@ export class BrandsController {
 
     const { data, error } = await this.supabase.admin
       .from('brand_library_counts')
-      .select('brand_id,product_count,clinical_count,media_count,total_count')
+      .select(
+        'brand_id,product_count,clinical_count,media_count,academy_count,total_count',
+      )
       .in('brand_id', brandIds);
 
     if (error) {
@@ -91,6 +94,7 @@ export class BrandsController {
       counts.set(row.brand_id, {
         product: Number(row.product_count ?? 0),
         clinical: Number(row.clinical_count ?? 0),
+        academy: Number(row.academy_count ?? 0),
         media: Number(row.media_count ?? 0),
         total: Number(row.total_count ?? 0),
       });

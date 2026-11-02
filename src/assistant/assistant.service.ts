@@ -49,7 +49,7 @@ export type AssistantEvent =
 type MessageRow = { role: 'user' | 'assistant'; content: string };
 
 /**
- * Answers a field user's question from approved MayPharm content: retrieves
+ * Answers a field user's question from approved Maypharm content: retrieves
  * sources, streams a grounded, cited answer, and keeps the conversation and
  * what it cited (for compliance review).
  */
@@ -87,7 +87,7 @@ export class AssistantService {
   assertConfigured() {
     if (!this.configured) {
       throw new ServiceUnavailableException(
-        'The MayPharm Assistant is not available right now.',
+        'The Maypharm Assistant is not available right now.',
       );
     }
   }

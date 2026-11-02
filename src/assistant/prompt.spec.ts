@@ -58,7 +58,7 @@ describe('assistant prompt', () => {
 
   it('says so when nothing matched', () => {
     expect(buildContext([])).toBe(
-      'No approved MayPharm content matched this message.',
+      'No approved Maypharm content matched this message.',
     );
   });
 
@@ -138,7 +138,7 @@ describe('assistant prompt', () => {
 
   it('describes the library, or says it is empty', () => {
     expect(formatOverview({ totalItems: 0, byType: {}, brands: [] })).toBe(
-      'The MayPharm library has no published content yet.',
+      'The Maypharm library has no published content yet.',
     );
     expect(
       formatOverview({
@@ -162,7 +162,7 @@ describe('assistant prompt', () => {
       'No content search was run: this message is conversational.',
     );
     const turn = buildUserTurn('What is Calpol?', overview, [source()]);
-    expect(turn).toContain('Approved MayPharm sources:');
+    expect(turn).toContain('Approved Maypharm sources:');
     expect(turn).toContain('[1] Calpol Product Monograph');
     expect(turn.endsWith('User message: What is Calpol?')).toBe(true);
   });

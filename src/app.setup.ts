@@ -25,6 +25,11 @@ export function configureApp(app: NestExpressApplication, config: AppConfig) {
   // bodies are small JSON documents.
   app.useBodyParser('json', { limit: '256kb' });
   app.useBodyParser('urlencoded', { limit: '64kb', extended: false });
+  // The one exception: a profile picture, sent as the raw image.
+  app.useBodyParser('raw', {
+    type: ['image/jpeg', 'image/png', 'image/webp'],
+    limit: '2mb',
+  });
 
   app.enableCors({
     origin: config.corsOrigins,

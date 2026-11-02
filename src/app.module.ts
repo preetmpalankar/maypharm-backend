@@ -19,6 +19,7 @@ import { BrandsController } from './brands.controller';
 import { CategoriesController } from './categories.controller';
 import { AccountThrottlerGuard } from './common/account-throttler.guard';
 import { ContentController } from './content.controller';
+import { MeController } from './me.controller';
 import { EmbeddingsService } from './knowledge/embeddings.service';
 import { GraphExtractionService } from './knowledge/graph-extraction.service';
 import { KnowledgeIndexerService } from './knowledge/knowledge-indexer.service';
@@ -36,6 +37,7 @@ import { SupabaseService } from './supabase.service';
   ],
   controllers: [
     AppController,
+    MeController,
     ContentController,
     BrandsController,
     CategoriesController,

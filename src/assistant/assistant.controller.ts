@@ -29,7 +29,7 @@ const chatSchema = z.object({
 const heartbeatMs = 15_000;
 
 /**
- * The MayPharm Assistant for field users. Answers stream as Server-Sent
+ * The Maypharm Assistant for field users. Answers stream as Server-Sent
  * Events: meta → status(searching) → sources → status(answering) → delta… →
  * done | error. Everything before the stream opens (auth, validation, a
  * missing conversation) fails as a normal JSON error.
